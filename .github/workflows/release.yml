@@ -51,12 +51,9 @@ jobs:
             echo "Created and pushed tag $VERSION"
           fi
 
-      - name: Generate release notes
-        id: release_notes
+      - name: Generate Release Changelog
+        id: changelog
         run: |
-          VERSION=${{ steps.get_version.outputs.version }}
-          VERSION_NUM=${VERSION#v}
-          
           # Get commit messages since last tag
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
           
@@ -65,49 +62,47 @@ jobs:
             CHANGELOG=$(git log --pretty=format:"- %s" | head -50)
           else
             # Get commits between tags
-            CHANGELOG=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s")
+            CHANGELOG=$(git log "${PREVIOUS_TAG}..HEAD" --pretty=format:"- %s")
           fi
           
-          # Create release notes
-          NOTES="## Changes
-
-${CHANGELOG}
-
-## Installation
-
-\`\`\`bash
-# Clone the repository
-git clone https://github.com/${{ github.repository }}.git
-cd CrontabManager
-
-# Deploy
-./deploy.sh
-
-# Start
-./start.sh
-\`\`
-
-## Features
-
-- 📋 Web-based crontab management
-- 🔄 Two task types: Simple (one-time) and Daemon (auto-restart)
-- ⏸️ Task suspend/resume functionality
-- 📝 Script template system
-- 📊 Real-time log viewing
-- 🗑️ Selective deletion (script/log options)"
-
-          # Write to file
-          echo "$NOTES" > release_notes.md
-          cat release_notes.md
+          # Save to output
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.get_version.outputs.version }}
           name: Release ${{ steps.get_version.outputs.version }}
-          body_path: release_notes.md
+          body: |
+            ## Changes
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ## Installation
+
+            ```bash
+            # Clone the repository
+            git clone https://github.com/${{ github.repository }}.git
+            cd CrontabManager
+
+            # Deploy
+            ./deploy.sh
+
+            # Start
+            ./start.sh
+            ```
+
+            ## Features
+
+            - 📋 Web-based crontab management
+            - 🔄 Two task types: Simple (one-time) and Daemon (auto-restart)
+            - ⏸️ Task suspend/resume functionality
+            - 📝 Script template system
+            - 📊 Real-time log viewing
+            - 🗑️ Selective deletion (script/log options)
           draft: false
           prerelease: false
-          generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
