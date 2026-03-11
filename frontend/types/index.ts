@@ -3,9 +3,10 @@ export interface Task {
   name: string;
   description?: string;
   cron: string;
-  task_type: 'inline' | 'file';
+  task_type?: 'inline' | 'file';
   script_source_path?: string;
   script_path?: string;
+  script_content?: string;
   custom_log_path?: string;
   working_dir?: string;
   env_vars?: string;
