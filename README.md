@@ -1,363 +1,374 @@
 # Crontab Manager
 
-一个基于系统 crontab 的脚本任务管理工具。所有任务都会被转换为 bash 脚本并添加到 crontab 中执行，即使管理器停止，任务仍会按计划执行。
+A web-based crontab management tool. All tasks are converted to bash scripts and added to system crontab. Tasks continue to execute as scheduled even if the manager is stopped.
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Node.js 18+](https://img.shields.io/badge/node.js-18+-green.svg)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](./VERSION)
 
-## 特性
+## Features
 
-- 📝 **可视化 crontab 管理** - 通过 Web 界面管理定时任务
-- 🐚 **纯 Bash 执行** - 所有任务统一转换为 bash 脚本
-- 📂 **支持已有脚本** - 直接使用服务器上已有的可执行脚本
-- ⏰ **系统级调度** - 使用系统 crontab，管理器停止不影响任务执行
-- 📊 **执行日志** - 查看任务的执行历史和输出
-- 🔄 **实时同步** - 任务修改自动同步到 crontab
+- 📝 **Visual Crontab Management** - Manage scheduled tasks via Web UI
+- 🐚 **Pure Bash Execution** - All tasks are converted to bash scripts
+- 🔄 **Two Task Types** - Simple (one-time execution) and Daemon (auto-restart)
+- ⏸️ **Task Suspension** - Pause tasks without removing from crontab
+- ⏰ **System-level Scheduling** - Uses system crontab, works even when manager stops
+- 📊 **Execution Logs** - View task execution history and output
+- 🗑️ **Selective Deletion** - Choose to keep or delete scripts and logs
+- 🔄 **Real-time Sync** - Task changes automatically sync to crontab
 
-## 技术栈
+## Tech Stack
 
-- **后端**: Python + FastAPI + SQLAlchemy
-- **前端**: Next.js 14 + React + TypeScript + Tailwind CSS
-- **调度**: 系统 crontab
-- **数据库**: SQLite
+- **Backend**: Python + FastAPI + Pydantic
+- **Frontend**: Next.js 14 + React + TypeScript + Tailwind CSS
+- **Scheduler**: System crontab
+- **Storage**: Crontab as single source of truth (no database)
 
-## 快速开始
+## Quick Start
 
-### 系统要求
+### Requirements
 
-- Ubuntu 22.04 (推荐)
+- Ubuntu 22.04 (recommended)
 - Python 3.9+
 - Node.js 18+
 - cron
 
-### 一键部署
+### One-Click Deploy
 
 ```bash
-# 克隆项目
-git clone <repository> crontab-manager
-cd crontab-manager
+# Clone repository
+git clone https://github.com/RoadToQuant/CrontabManager.git
+cd CrontabManager
 
-# 部署
+# Deploy
 ./deploy.sh
 
-# 启动
+# Start
 ./start.sh
 ```
 
-访问 http://localhost:3000
+Visit http://localhost:3000
 
-### 手动安装
+### Manual Install
 
 ```bash
-# 后端
+# Backend
 cd backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 python main.py
 
-# 前端 (新终端)
+# Frontend (new terminal)
 cd frontend
 npm install
 npm run dev
 ```
 
-## 如何使用
+## Usage Guide
 
-### 创建任务 - 方式一：编写脚本
+### Creating Tasks
 
-适用于需要编写新脚本的场景。
+#### Task Type 1: Simple Task (One-time Execution)
 
-**步骤：**
+For tasks that run once per scheduled cycle and then exit. Ideal for periodic jobs like backups, data sync, reports.
 
-1. 点击 **"新建任务"**
-2. 选择 **"编写脚本"** 任务类型
-3. 填写基本信息：
-   - **任务名称**: `检测内网IP`
-   - **描述**: `每分钟检测本机内网IP地址`
-   - **Cron 表达式**: `* * * * *` (每分钟执行)
-4. 在脚本编辑器中编写 bash 脚本：
+**Steps:**
 
-```bash
-#!/bin/bash
-
-echo "========================================"
-echo "检测时间: $(date '+%Y-%m-%d %H:%M:%S')"
-echo "========================================"
-
-# 获取主机名
-echo "主机名: $(hostname)"
-
-# 获取内网IP
-echo ""
-echo "内网IP地址:"
-ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1'
-
-echo ""
-echo "========================================"
-```
-
-5. （可选）设置工作目录和环境变量
-6. 勾选 **"立即启用"**
-7. 点击 **"创建任务"**
-
-**系统行为：**
-- 脚本内容保存到 `backend/data/scripts/task_{id}/run.sh`
-- 自动添加到系统 crontab
-- 执行日志保存到 `backend/data/scripts/task_{id}/cron.log`
-
----
-
-### 创建任务 - 方式二：已有脚本
-
-适用于服务器上已有写好的脚本，只想将其添加到 crontab 执行。
-
-**场景示例：**
-
-假设你已经在 `/home/ubuntu/scripts/` 目录下有一个备份脚本 `backup.sh`：
+1. Click **"New Task"**
+2. Select **"Simple Task"** type
+3. Fill in basic info:
+   - **Name**: `Daily Backup`
+   - **Description**: `Backup data at 2 AM daily`
+   - **Cron Expression**: `0 2 * * *` (daily at 2 AM)
+4. Write bash script:
 
 ```bash
 #!/bin/bash
-# /home/ubuntu/scripts/backup.sh
 
-echo "开始备份: $(date)"
+echo "========================================"
+echo "Backup started at $(date)"
+echo "========================================"
+
+# Backup data
 tar -czf /backup/data_$(date +%Y%m%d).tar.gz /home/ubuntu/data/
-echo "备份完成: $(date)"
+
+echo "Backup completed at $(date)"
+echo "========================================"
 ```
 
-并且该脚本已有执行权限：
-```bash
-chmod +x /home/ubuntu/scripts/backup.sh
-```
+5. (Optional) Set working directory and environment variables
+6. Check **"Enable immediately"**
+7. Click **"Create Task"**
 
-**创建任务步骤：**
+#### Task Type 2: Daemon Task (Auto-restart)
 
-1. 点击 **"新建任务"**
-2. 选择 **"已有脚本"** 任务类型
-3. 填写基本信息：
-   - **任务名称**: `每日数据备份`
-   - **描述**: `每天凌晨备份数据`
-   - **Cron 表达式**: `0 2 * * *` (每天凌晨2点)
-4. 选择脚本文件：
-   - 点击文件夹图标打开文件浏览器
-   - 导航到 `/home/ubuntu/scripts/`
-   - 选择 `backup.sh`（显示绿色勾选表示可执行）
-5. （可选）设置自定义日志路径：
-   - 例如：`/var/log/backup.log`
-   - 留空则使用默认路径
-6. （可选）设置工作目录：`/home/ubuntu`
-7. （可选）设置环境变量：`{"BACKUP_DIR": "/home/ubuntu/data"}`
-8. 勾选 **"立即启用"**
-9. 点击 **"创建任务"**
+For wrapping existing scripts as daemon processes. Monitors the process and auto-restarts if it crashes. Ideal for long-running services.
 
-**系统创建的包装脚本：**
+**Scenario Example:**
 
-当使用"已有脚本"方式时，系统不会直接修改你的原始脚本，而是创建一个**包装脚本**（wrapper）。假设任务 ID 为 5，生成的包装脚本如下：
+You have a Jupyter Server startup script at `/home/ubuntu/projects/services/start_jupyterserver.sh` and want to ensure it keeps running.
+
+**Steps:**
+
+1. Click **"New Task"**
+2. Select **"Daemon Task"** type
+3. Fill in basic info:
+   - **Name**: `Jupyter Server Daemon`
+   - **Description**: `Monitor and auto-restart Jupyter Server`
+   - **Cron Expression**: `* * * * *` (check every minute)
+4. Configure daemon settings:
+   - **Target Script**: `/home/ubuntu/projects/services/start_jupyterserver.sh`
+   - **Process Name**: `jupyter` (used to identify process via pgrep)
+   - **Auto-restart**: ✓ Enabled
+   - **Restart Delay**: 5 seconds
+   - **Max Restarts**: 3
+
+**How Daemon Works:**
+
+1. Cron executes the wrapper script every minute
+2. Script checks if target process is running (via PID file + process name)
+3. If running normally, exits and waits for next check
+4. If process not found, executes the startup script
+5. Records new PID to file
+6. If auto-restart enabled, retries on failure up to max restarts
+
+**Generated Wrapper Script Example:**
 
 ```bash
 #!/bin/bash
+# Auto-generated by Script Monitor - Daemon Task
 
-# Auto-generated by Script Monitor
-# Task: 每日数据备份
-# Source: /home/ubuntu/scripts/backup.sh
-# Created: 2026-03-11T10:30:00
+PID_FILE="/tmp/script_monitor_daemon_jupyter.pid"
+PROCESS_NAME="jupyter"
+TARGET_SCRIPT="/home/ubuntu/projects/services/start_jupyterserver.sh"
 
-# Set error handling
-set -e
+echo "[$$(date)] Daemon check: $PROCESS_NAME"
 
-# Environment variables
-export BACKUP_DIR="/home/ubuntu/data"
+# Check PID file
+if [ -f "$PID_FILE" ]; then
+    SAVED_PID=$(cat "$PID_FILE")
+    if ps -p "$SAVED_PID" > /dev/null 2>&1; then
+        if pgrep -f "$PROCESS_NAME" | grep -qw "$SAVED_PID"; then
+            echo "✓ Process running (PID: $SAVED_PID)"
+            exit 0
+        fi
+    fi
+    rm -f "$PID_FILE"
+fi
 
-# Change to working directory
-cd "/home/ubuntu"
+# Check for existing process by name
+EXISTING_PID=$(pgrep -f "$PROCESS_NAME" | head -1)
+if [ -n "$EXISTING_PID" ]; then
+    echo "$EXISTING_PID" > "$PID_FILE"
+    exit 0
+fi
 
-# Execute original script
-"/home/ubuntu/scripts/backup.sh"
+# Start process
+echo "Starting process..."
+bash "$TARGET_SCRIPT" &
+NEW_PID=$!
+sleep 5
+
+if ps -p "$NEW_PID" > /dev/null 2>&1; then
+    echo "$NEW_PID" > "$PID_FILE"
+    echo "✓ Started successfully (PID: $NEW_PID)"
+else
+    echo "✗ Failed to start"
+    exit 1
+fi
 ```
-
-包装脚本保存在：`backend/data/scripts/task_5/run.sh`
-
-**包装脚本的作用：**
-
-1. **环境隔离** - 在调用原始脚本前设置环境变量
-2. **工作目录** - 切换到指定的工作目录
-3. **错误处理** - 添加 `set -e` 确保错误时能正确反馈
-4. **安全保护** - 不修改原始脚本，便于维护和更新
-
-**crontab 中的条目：**
-
-```
-# script-monitor-task:5
-# name="每日数据备份"
-0 2 * * * /opt/script-monitor/backend/data/scripts/task_5/run.sh >> /var/log/backup.log 2>&1
-```
-
-**文件浏览器说明：**
-
-- 🏠 **Home 按钮** - 返回用户主目录（默认起点）
-- ⬆️ **上级目录** - 返回父目录
-- 📁 **文件夹** - 点击进入子目录
-- 📄 **绿色文件** - 有可执行权限的脚本，可选择
-- 📄 **灰色文件** - 无执行权限，无法选择
 
 ---
 
-### Cron 表达式格式
+### Cron Expression Format
 
 ```
 * * * * *
 │ │ │ │ │
-│ │ │ │ └── 星期 (0-6, 0=周日)
-│ │ │ └──── 月份 (1-12)
-│ │ └────── 日期 (1-31)
-│ └──────── 小时 (0-23)
-└────────── 分钟 (0-59)
+│ │ │ │ └── Weekday (0-6, 0=Sunday)
+│ │ │ └──── Month (1-12)
+│ │ └────── Day (1-31)
+│ └──────── Hour (0-23)
+└────────── Minute (0-59)
 ```
 
-**常用示例：**
+**Common Examples:**
 
-| 表达式 | 说明 |
-|--------|------|
-| `* * * * *` | 每分钟 |
-| `*/5 * * * *` | 每5分钟 |
-| `0 * * * *` | 每小时整点 |
-| `0 9 * * *` | 每天 9:00 |
-| `0 0 * * *` | 每天 0:00（午夜） |
-| `0 0 * * 1` | 每周一 0:00 |
-| `0 9 1 * *` | 每月1日 9:00 |
-| `*/30 9-17 * * 1-5` | 工作日 9-17点每30分钟 |
+| Expression | Description |
+|------------|-------------|
+| `* * * * *` | Every minute |
+| `*/5 * * * *` | Every 5 minutes |
+| `0 * * * *` | Every hour at :00 |
+| `0 9 * * *` | Daily at 9:00 |
+| `0 0 * * *` | Daily at 0:00 (midnight) |
+| `0 0 * * 1` | Weekly on Monday 0:00 |
+| `0 9 1 * *` | Monthly on 1st at 9:00 |
 
 ---
 
-### 管理任务
+### Managing Tasks
 
-**启用/禁用任务：**
-- 在任务列表中点击开关按钮
-- 禁用后任务会从 crontab 中移除（保留配置）
-- 启用后重新添加到 crontab
+**Task Status:**
 
-**立即执行：**
-- 点击任务列表中的 **"▶ 立即执行"** 按钮
-- 手动触发一次执行（不影响定时调度）
-- 执行结果可在执行记录中查看
+- **Enabled** - Task is active in crontab (uncommented)
+- **Disabled** - Task is commented out in crontab
+- **Suspended** - Task is paused, kept in crontab (commented), can be resumed
 
-**查看日志：**
-- 点击 **"📄 查看日志"** 查看 cron 执行日志
-- 支持查看最近 50/100/200/500 行
-- 可清空日志文件
+**Operations:**
 
-**编辑任务：**
-- 点击任务名称进入编辑页面
-- 可修改所有配置信息
-- 修改后自动同步到 crontab
+| Button | Action | Description |
+|--------|--------|-------------|
+| ▶ Run | Execute now | Manually trigger execution |
+| ⏸ Pause | Suspend | Pause task, can resume later |
+| ▶ Resume | Resume | Resume suspended task |
+| ⚡ Toggle | Enable/Disable | Toggle enabled/disabled state |
+| 📝 Edit | Edit | Modify task configuration |
+| 📄 Logs | View logs | View execution logs |
+| 🗑 Delete | Delete | Remove task with options |
 
-**删除任务：**
-- 点击 **"🗑 删除"** 按钮
-- 从 crontab 中移除
-- 删除脚本文件和日志
-- 保留执行历史记录
+**Delete Options:**
+- Delete script file (optional)
+- Delete log file (optional)
+- Keep both files if unchecked
 
 ---
 
-## 项目结构
+## Project Structure
 
 ```
-crontab-manager/
-├── backend/              # FastAPI 后端
-│   ├── api/              # API 路由
-│   ├── services/         # 业务逻辑
-│   ├── data/             # 数据目录
-│   │   ├── monitor.db    # SQLite 数据库
-│   │   └── scripts/      # 脚本文件
+CrontabManager/
+├── backend/              # FastAPI backend
+│   ├── api/              # API routes
+│   ├── services/         # Business logic
+│   │   ├── crontab_manager.py    # Crontab operations
+│   │   ├── task_runner.py        # Manual execution
+│   │   ├── file_storage.py       # Script file management
+│   │   ├── log_manager.py        # Log file management
+│   │   └── task_templates.py     # Script template generators
+│   ├── data/             # Data directory
+│   │   └── scripts/      # Task scripts
 │   │       └── task_{id}/
-│   │           ├── run.sh      # 任务脚本（或包装脚本）
-│   │           └── cron.log    # 执行日志
-│   └── main.py           # 入口文件
-├── frontend/             # Next.js 前端
-│   ├── app/              # 页面路由
-│   └── components/       # 组件
-├── deploy.sh             # 部署脚本
-├── start.sh              # 启动脚本
+│   │           ├── run.sh      # Generated script
+│   │           └── cron.log    # Execution log
+│   ├── main.py           # Entry point
+│   ├── models.py         # Pydantic models
+│   └── requirements.txt
+├── frontend/             # Next.js frontend
+│   ├── app/              # Page routes
+│   ├── components/       # Components
+│   └── lib/
+│       └── api.ts        # API client
+├── .github/
+│   └── workflows/
+│       └── release.yml   # Auto-release workflow
+├── deploy.sh             # Deploy script
+├── start.sh              # Start script
+├── stop.sh               # Stop script
+├── VERSION               # Version file
 └── README.md
 ```
 
-## 开发
+## Configuration
 
-### 常用命令
-
-```bash
-make dev      # 启动开发服务器
-make build    # 构建生产版本
-make test     # 运行测试
-make lint     # 代码检查
-make format   # 代码格式化
-make clean    # 清理缓存
-make db-reset # 重置数据库
-make sync     # 同步 crontab
-```
-
-### Git 工作流
-
-```bash
-# 创建功能分支
-git checkout -b feature/xxx
-
-# 提交修改
-git add .
-git commit -m "feat: 添加新功能"
-
-# 推送
-git push origin feature/xxx
-```
-
-详见 [CONTRIBUTING.md](CONTRIBUTING.md)
-
-## 配置
-
-编辑 `.env` 文件：
+Edit `.env` file:
 
 ```env
-# 后端配置
+# Backend config
 BACKEND_HOST=0.0.0.0
 BACKEND_PORT=8000
 
-# Crontab 用户 (留空表示当前用户)
+# Data directories
+DATA_DIR=./data
+SCRIPTS_DIR=./data/scripts
+
+# Crontab user (empty = current user)
 CRONTAB_USER=
 
-# 任务前缀
-CRON_TASK_PREFIX=# script-monitor-task:
+# Task prefix in crontab
+CRON_TASK_PREFIX=# script-monitor:
 ```
 
-## 工作原理
+## Development
 
-### 编写脚本模式
-1. 用户在 Web 界面编写 bash 脚本
-2. 后端将脚本内容保存到文件
-3. 添加到系统 crontab
-4. cron 直接执行该脚本
+### Makefile Commands
 
-### 已有脚本模式
-1. 用户选择服务器上的可执行脚本
-2. 后端创建一个包装脚本（wrapper）
-3. 包装脚本设置环境后调用原始脚本
-4. 添加到系统 crontab 的是包装脚本
+```bash
+make dev      # Start development servers
+make build    # Build production version
+make test     # Run tests
+make format   # Format code
+make clean    # Clean cache
+```
 
-### 日志记录
-- 执行输出通过 `>> logfile 2>&1` 重定向
-- 支持自定义日志路径
-- 默认保存到任务目录的 `cron.log`
+### Release Workflow
 
-## 更新日志
+1. Update `VERSION` file:
+   ```bash
+   echo "0.2.0" > VERSION
+   ```
 
-详见 [CHANGELOG.md](CHANGELOG.md)
+2. Commit and push to master:
+   ```bash
+   git add VERSION
+   git commit -m "chore: bump version to 0.2.0"
+   git push origin master
+   ```
 
-## 贡献
+3. Merge to release branch (triggers auto-release):
+   ```bash
+   git checkout release
+   git merge master
+   git push origin release
+   ```
 
-欢迎提交 Issue 和 Pull Request！
+GitHub Actions will:
+- Read version from `VERSION` file
+- Create git tag (e.g., `v0.2.0`)
+- Create GitHub Release
 
-详见 [CONTRIBUTING.md](CONTRIBUTING.md)
+## How It Works
 
-## 许可证
+### Data Storage
+
+Unlike traditional task managers that use databases, Crontab Manager uses the **system crontab as the single source of truth**.
+
+Task data is stored in crontab comments as JSON:
+
+```crontab
+# script-monitor:{"id":1,"name":"Daily Backup","status":"enabled",...}
+0 2 * * * /opt/crontab-manager/backend/data/scripts/task_1/run.sh >> /opt/crontab-manager/backend/data/scripts/task_1/cron.log 2>&1
+```
+
+**Benefits:**
+- No database required
+- Tasks survive manager restarts/crashes
+- Native crontab reliability
+- Easy to inspect and debug
+
+### Script Execution
+
+1. **Simple Tasks**: Execute script directly, exit after completion
+2. **Daemon Tasks**: Wrapper script checks process status, starts if needed
+
+### Log Management
+
+- Execution output redirected to `cron.log`
+- View logs via Web UI
+- Optional: Custom log path
+- Clear logs without affecting task
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md)
+
+## Contributing
+
+Issues and Pull Requests are welcome!
+
+See [CONTRIBUTING.md](CONTRIBUTING.md)
+
+## License
 
 [MIT](LICENSE)
