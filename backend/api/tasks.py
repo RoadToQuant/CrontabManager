@@ -1,6 +1,7 @@
 """Task API routes."""
 from typing import List, Optional
 from datetime import datetime
+from pathlib import Path
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -18,7 +19,14 @@ class TaskCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     cron: str = Field(..., min_length=1, max_length=100)
-    script_content: str = Field(..., min_length=1)  # Received from frontend, saved to file
+    # Task type: 'inline' (script content) or 'file' (existing script file)
+    task_type: str = Field(default="inline", pattern="^(inline|file)$")
+    # For 'inline' type: script content
+    script_content: Optional[str] = None
+    # For 'file' type: path to existing script
+    script_source_path: Optional[str] = None
+    # Custom log output path (optional)
+    custom_log_path: Optional[str] = None
     working_dir: Optional[str] = ""
     env_vars: Optional[str] = "{}"
     status: str = Field(default="enabled", pattern="^(enabled|disabled)$")
@@ -28,7 +36,8 @@ class TaskUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
     cron: Optional[str] = Field(None, min_length=1, max_length=100)
-    script_content: Optional[str] = None  # Received from frontend, saved to file
+    script_content: Optional[str] = None
+    custom_log_path: Optional[str] = None
     working_dir: Optional[str] = None
     env_vars: Optional[str] = None
     status: Optional[str] = Field(None, pattern="^(enabled|disabled)$")
@@ -39,13 +48,16 @@ class TaskResponse(BaseModel):
     name: str
     description: Optional[str]
     cron: str
+    task_type: str
+    script_source_path: Optional[str]
     script_path: Optional[str]
+    custom_log_path: Optional[str]
     working_dir: Optional[str]
     env_vars: Optional[str]
     status: str
     created_at: str
     updated_at: str
-    script_content: Optional[str] = None  # Added dynamically from file
+    script_content: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -61,7 +73,30 @@ def list_tasks(db: Session = Depends(get_db)):
 @router.post("", response_model=TaskResponse)
 def create_task(task_data: TaskCreate, db: Session = Depends(get_db)):
     """Create a new task and add to crontab."""
-    # Create task in database (without script_content)
+    
+    # Validate task type specific fields
+    if task_data.task_type == "inline":
+        if not task_data.script_content:
+            raise HTTPException(status_code=400, detail="Script content is required for inline tasks")
+        script_content = task_data.script_content
+    elif task_data.task_type == "file":
+        if not task_data.script_source_path:
+            raise HTTPException(status_code=400, detail="Script source path is required for file tasks")
+        # Validate source file exists and is executable
+        source_path = Path(task_data.script_source_path).expanduser().resolve()
+        if not source_path.exists():
+            raise HTTPException(status_code=400, detail=f"Script file not found: {task_data.script_source_path}")
+        if not source_path.is_file():
+            raise HTTPException(status_code=400, detail=f"Path is not a file: {task_data.script_source_path}")
+        # Read script content for wrapper generation
+        try:
+            script_content = source_path.read_text(encoding='utf-8')
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to read script file: {e}")
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid task type: {task_data.task_type}")
+    
+    # Create task in database
     db_data = task_data.model_dump(exclude={'script_content'})
     task = Task(**db_data)
     db.add(task)
@@ -69,15 +104,24 @@ def create_task(task_data: TaskCreate, db: Session = Depends(get_db)):
     db.refresh(task)
     
     # Save script content to file and add to crontab
-    script_path = crontab_manager.add_or_update_task(
-        task.id,
-        task.name,
-        task.cron,
-        task_data.script_content,  # Pass script content to save to file
-        task.working_dir,
-        task.env_vars,
-        enabled=(task.status == "enabled")
-    )
+    try:
+        script_path = crontab_manager.add_or_update_task(
+            task.id,
+            task.name,
+            task.cron,
+            script_content,
+            task.working_dir,
+            task.env_vars,
+            enabled=(task.status == "enabled"),
+            task_type=task.task_type,
+            script_source_path=task.script_source_path,
+            custom_log_path=task.custom_log_path
+        )
+    except Exception as e:
+        # Rollback if crontab failed
+        db.delete(task)
+        db.commit()
+        raise HTTPException(status_code=500, detail=f"Failed to add task to crontab: {e}")
     
     if script_path:
         task.script_path = str(script_path)
@@ -90,7 +134,7 @@ def create_task(task_data: TaskCreate, db: Session = Depends(get_db)):
     
     # Return with script_content
     result = task.to_dict()
-    result['script_content'] = task_data.script_content
+    result['script_content'] = script_content
     return result
 
 
@@ -104,15 +148,14 @@ def get_task(task_id: int, db: Session = Depends(get_db)):
     result = task.to_dict()
     # Read script content from file
     try:
-        import aiofiles
         script_path = file_storage.get_script_path(task_id)
         if script_path.exists():
             with open(script_path, 'r', encoding='utf-8') as f:
                 result['script_content'] = f.read()
         else:
-            result['script_content'] = file_storage.get_default_template()
+            result['script_content'] = ""
     except Exception:
-        result['script_content'] = file_storage.get_default_template()
+        result['script_content'] = ""
     
     return result
 
@@ -134,8 +177,7 @@ def update_task(task_id: int, task_data: TaskUpdate, db: Session = Depends(get_d
     db.commit()
     db.refresh(task)
     
-    # If script_content provided, save to file
-    script_content = None
+    # Get script content
     if task_data.script_content is not None:
         script_content = task_data.script_content
         # Save to file
@@ -143,24 +185,29 @@ def update_task(task_id: int, task_data: TaskUpdate, db: Session = Depends(get_d
         asyncio.run(file_storage.write_script(task_id, script_content))
     else:
         # Read existing script
-        try:
-            script_path = file_storage.get_script_path(task_id)
-            if script_path.exists():
-                with open(script_path, 'r', encoding='utf-8') as f:
-                    script_content = f.read()
-        except Exception:
-            script_content = file_storage.get_default_template()
+        script_path = file_storage.get_script_path(task_id)
+        if script_path.exists():
+            with open(script_path, 'r', encoding='utf-8') as f:
+                script_content = f.read()
+        else:
+            script_content = "#!/bin/bash\n"
     
     # Update crontab
-    script_path = crontab_manager.add_or_update_task(
-        task.id,
-        task.name,
-        task.cron,
-        script_content or file_storage.get_default_template(),
-        task.working_dir,
-        task.env_vars,
-        enabled=(task.status == "enabled")
-    )
+    try:
+        script_path = crontab_manager.add_or_update_task(
+            task.id,
+            task.name,
+            task.cron,
+            script_content,
+            task.working_dir,
+            task.env_vars,
+            enabled=(task.status == "enabled"),
+            task_type=task.task_type,
+            script_source_path=task.script_source_path,
+            custom_log_path=task.custom_log_path
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update crontab: {e}")
     
     if script_path:
         task.script_path = str(script_path)
@@ -170,7 +217,7 @@ def update_task(task_id: int, task_data: TaskUpdate, db: Session = Depends(get_d
     
     # Return with script_content
     result = task.to_dict()
-    result['script_content'] = script_content or file_storage.get_default_template()
+    result['script_content'] = script_content
     return result
 
 
@@ -206,23 +253,27 @@ def toggle_task(task_id: int, db: Session = Depends(get_db)):
     db.commit()
     
     # Read current script content
-    script_content = file_storage.get_default_template()
-    try:
-        script_path = file_storage.get_script_path(task_id)
-        if script_path.exists():
-            with open(script_path, 'r', encoding='utf-8') as f:
-                script_content = f.read()
-    except Exception:
-        pass
+    script_path = file_storage.get_script_path(task_id)
+    if script_path.exists():
+        with open(script_path, 'r', encoding='utf-8') as f:
+            script_content = f.read()
+    else:
+        script_content = "#!/bin/bash\n"
     
     # Update crontab
-    success = crontab_manager.toggle_task(
-        task.id,
-        task.name,
-        task.cron,
-        task.script_path or str(file_storage.get_script_path(task_id)),
-        enabled=(new_status == "enabled")
-    )
+    try:
+        success = crontab_manager.toggle_task(
+            task.id,
+            task.name,
+            task.cron,
+            task.script_path or str(script_path),
+            enabled=(new_status == "enabled")
+        )
+    except Exception as e:
+        # Rollback
+        task.status = "enabled" if new_status == "disabled" else "disabled"
+        db.commit()
+        raise HTTPException(status_code=500, detail=f"Failed to update crontab: {e}")
     
     if not success:
         # Rollback

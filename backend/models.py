@@ -24,8 +24,14 @@ class Task(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     cron = Column(String(100), nullable=False)
-    # Script file path (auto-generated, not stored in DB)
+    # Task type: 'inline' (script content) or 'file' (existing script file)
+    task_type = Column(String(20), default="inline")
+    # For 'file' type: path to existing script
+    script_source_path = Column(String(500), nullable=True)
+    # Script file path (auto-generated wrapper script for 'inline' type, symlink/copy for 'file' type)
     script_path = Column(String(500), nullable=True)
+    # Custom log output path (optional, for 'file' type)
+    custom_log_path = Column(String(500), nullable=True)
     # Working directory for the script
     working_dir = Column(String(500), nullable=True, default="")
     # Environment variables (JSON format)
@@ -41,7 +47,10 @@ class Task(Base):
             "name": self.name,
             "description": self.description,
             "cron": self.cron,
+            "task_type": self.task_type,
+            "script_source_path": self.script_source_path,
             "script_path": self.script_path,
+            "custom_log_path": self.custom_log_path,
             "working_dir": self.working_dir,
             "env_vars": self.env_vars,
             "status": self.status,

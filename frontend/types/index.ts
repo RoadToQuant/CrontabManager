@@ -3,8 +3,10 @@ export interface Task {
   name: string;
   description?: string;
   cron: string;
-  script_content: string;
+  task_type: 'inline' | 'file';
+  script_source_path?: string;
   script_path?: string;
+  custom_log_path?: string;
   working_dir?: string;
   env_vars?: string;
   status: 'enabled' | 'disabled';
@@ -49,4 +51,18 @@ export interface StorageStats {
     size_mb: number;
   };
   total_mb: number;
+}
+
+export interface FileItem {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  size?: number;
+  is_executable: boolean;
+}
+
+export interface FileListResponse {
+  current_path: string;
+  parent_path?: string;
+  items: FileItem[];
 }

@@ -1,4 +1,4 @@
-import { Task, TaskRun, Executor, SystemSettings, StorageStats } from '@/types';
+import { Task, TaskRun, Executor, SystemSettings, StorageStats, FileListResponse } from '@/types';
 
 const API_BASE = '/api';
 
@@ -23,11 +23,11 @@ async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
 export const tasksApi = {
   list: () => fetchApi<Task[]>('/tasks'),
   get: (id: number) => fetchApi<Task>(`/tasks/${id}`),
-  create: (data: Partial<Task>) => fetchApi<Task>('/tasks', {
+  create: (data: Partial<Task> & { script_content?: string; script_source_path?: string }) => fetchApi<Task>('/tasks', {
     method: 'POST',
     body: JSON.stringify(data),
   }),
-  update: (id: number, data: Partial<Task>) => fetchApi<Task>(`/tasks/${id}`, {
+  update: (id: number, data: Partial<Task> & { script_content?: string }) => fetchApi<Task>(`/tasks/${id}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   }),
@@ -102,4 +102,20 @@ export const settingsApi = {
   syncCrontab: () => fetchApi<{ added: number[]; removed: number[]; updated: number[]; errors: string[] }>('/settings/crontab/sync', {
     method: 'POST',
   }),
+};
+
+// File Browser API
+export const filesApi = {
+  browse: (path?: string) => fetchApi<FileListResponse>(`/files/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  getHome: () => fetchApi<{ home: string; username: string }>('/files/home'),
+  validatePath: (path: string) => fetchApi<{
+    path: string;
+    exists: boolean;
+    is_file: boolean;
+    is_dir: boolean;
+    is_executable: boolean;
+    is_in_home: boolean;
+    valid: boolean;
+    error?: string;
+  }>(`/files/validate?path=${encodeURIComponent(path)}`),
 };
