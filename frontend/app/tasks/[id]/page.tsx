@@ -63,7 +63,7 @@ export default function TaskDetailPage() {
         tasksApi.getRuns(taskId),
       ]);
       setTask(taskData);
-      setScriptContent(taskData.script_content);
+      setScriptContent(taskData.script_content || '');
       setRuns(runsData);
       
       // Set editable fields
