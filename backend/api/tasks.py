@@ -1,5 +1,5 @@
 """Task API routes - crontab as single source of truth."""
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
 from datetime import datetime
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException
@@ -8,18 +8,35 @@ from models import Task, memory_store
 from services.crontab_manager import crontab_manager
 from services.task_runner import task_runner
 from services.file_storage import file_storage
+from services.task_templates import generate_script
 
 router = APIRouter()
 
 
 # Pydantic models for request validation
 class TaskCreate(BaseModel):
+    """Task creation request.
+    
+    Task types:
+    - simple: One-time execution per cron cycle
+    - daemon: Monitor and auto-restart a process
+    """
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     cron: str = Field(..., min_length=1, max_length=100)
-    script_content: str = Field(..., min_length=1)
+    task_type: str = Field(default="simple", pattern="^(simple|daemon)$")
     working_dir: Optional[str] = ""
     env_vars: Optional[str] = "{}"
+    
+    # For simple tasks
+    script_content: Optional[str] = None
+    
+    # For daemon tasks
+    target_script: Optional[str] = None  # Path to script to wrap
+    process_name: Optional[str] = None   # Process identifier
+    auto_restart: Optional[bool] = True
+    restart_delay: Optional[int] = 5
+    max_restarts: Optional[int] = 3
 
 
 class TaskUpdate(BaseModel):
@@ -33,9 +50,8 @@ class TaskUpdate(BaseModel):
 
 class DeleteOptions(BaseModel):
     """Options for task deletion."""
-    delete_script: bool = True  # 删除脚本文件
-    delete_log: bool = True     # 删除日志文件
-    # Note: Task record is always removed from crontab (cannot be kept)
+    delete_script: bool = True
+    delete_log: bool = True
 
 
 @router.get("")
@@ -47,9 +63,45 @@ def list_tasks():
 
 @router.post("")
 def create_task(task_data: TaskCreate):
-    """Create a new task and add to crontab."""
+    """Create a new task and add to crontab.
+    
+    Task types:
+    - simple: Regular cron job that runs once per schedule
+    - daemon: Wraps a script and monitors the process, auto-restarts on crash
+    """
+    # Generate script content based on task type
+    if task_data.task_type == "daemon":
+        if not task_data.target_script or not task_data.process_name:
+            raise HTTPException(
+                status_code=400, 
+                detail="Daemon tasks require 'target_script' and 'process_name'"
+            )
+        script_content = generate_script(
+            task_type="daemon",
+            target_script=task_data.target_script,
+            process_name=task_data.process_name,
+            working_dir=task_data.working_dir or "",
+            env_vars=task_data.env_vars or "{}",
+            auto_restart=task_data.auto_restart if task_data.auto_restart is not None else True,
+            restart_delay=task_data.restart_delay if task_data.restart_delay is not None else 5,
+            max_restarts=task_data.max_restarts if task_data.max_restarts is not None else 3,
+        )
+    else:
+        # Simple task
+        if not task_data.script_content:
+            raise HTTPException(
+                status_code=400,
+                detail="Simple tasks require 'script_content'"
+            )
+        script_content = generate_script(
+            task_type="simple",
+            script_content=task_data.script_content,
+            working_dir=task_data.working_dir or "",
+            env_vars=task_data.env_vars or "{}",
+        )
+    
     task = Task(
-        id=0,  # Will be assigned by crontab_manager
+        id=0,
         name=task_data.name,
         description=task_data.description or "",
         cron=task_data.cron,
@@ -59,14 +111,13 @@ def create_task(task_data: TaskCreate):
         created_at=datetime.utcnow().isoformat(),
     )
     
-    script_path = crontab_manager.add_or_update_task(task, task_data.script_content)
+    script_path = crontab_manager.add_or_update_task(task, script_content)
     
     if not script_path:
         raise HTTPException(status_code=500, detail="Failed to add task to crontab")
     
-    # Return with script_content
     result = task.to_dict()
-    result['script_content'] = task_data.script_content
+    result['script_content'] = script_content
     return result
 
 
@@ -79,7 +130,6 @@ def get_task(task_id: int):
     
     result = task.to_dict()
     
-    # Read script content from file
     script_path = file_storage.get_script_path(task_id)
     if script_path.exists():
         result['script_content'] = script_path.read_text(encoding='utf-8')
@@ -96,7 +146,6 @@ def update_task(task_id: int, task_data: TaskUpdate):
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    # Update fields
     if task_data.name is not None:
         task.name = task_data.name
     if task_data.description is not None:
@@ -110,7 +159,6 @@ def update_task(task_id: int, task_data: TaskUpdate):
     
     task.updated_at = datetime.utcnow().isoformat()
     
-    # Get script content
     script_content = task_data.script_content
     if script_content is None:
         script_path = file_storage.get_script_path(task_id)
@@ -119,13 +167,11 @@ def update_task(task_id: int, task_data: TaskUpdate):
         else:
             script_content = file_storage.get_default_template()
     
-    # Update crontab
     script_path = crontab_manager.add_or_update_task(task, script_content)
     
     if not script_path:
         raise HTTPException(status_code=500, detail="Failed to update crontab")
     
-    # Return with script_content
     result = task.to_dict()
     result['script_content'] = script_content
     return result
@@ -133,16 +179,10 @@ def update_task(task_id: int, task_data: TaskUpdate):
 
 @router.delete("/{task_id}")
 def delete_task(task_id: int, options: Optional[DeleteOptions] = None):
-    """Delete a task with options.
-    
-    Args:
-        options: DeleteOptions with delete_script and delete_log flags.
-                If not provided, both script and log will be deleted.
-    """
+    """Delete a task with options."""
     if not crontab_manager.get_task(task_id):
         raise HTTPException(status_code=404, detail="Task not found")
     
-    # Default options
     delete_script = True
     delete_log = True
     if options:
@@ -157,10 +197,7 @@ def delete_task(task_id: int, options: Optional[DeleteOptions] = None):
 
 @router.post("/{task_id}/toggle")
 def toggle_task(task_id: int):
-    """Toggle task enabled/disabled status.
-    
-    Note: suspended tasks cannot be toggled. Use resume for suspended tasks.
-    """
+    """Toggle task enabled/disabled status."""
     task = crontab_manager.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -177,10 +214,7 @@ def toggle_task(task_id: int):
 
 @router.post("/{task_id}/suspend")
 def suspend_task(task_id: int):
-    """Suspend a task - comment out in crontab but keep all files.
-    
-    Suspended tasks can be resumed later.
-    """
+    """Suspend a task - comment out in crontab but keep all files."""
     task = crontab_manager.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -196,10 +230,7 @@ def suspend_task(task_id: int):
 
 @router.post("/{task_id}/resume")
 def resume_task(task_id: int):
-    """Resume a suspended task - re-enable in crontab.
-    
-    Only suspended tasks can be resumed.
-    """
+    """Resume a suspended task - re-enable in crontab."""
     task = crontab_manager.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")

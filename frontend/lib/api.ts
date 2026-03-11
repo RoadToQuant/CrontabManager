@@ -23,7 +23,15 @@ async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
 export const tasksApi = {
   list: () => fetchApi<Task[]>('/tasks'),
   get: (id: number) => fetchApi<Task>(`/tasks/${id}`),
-  create: (data: Partial<Task> & { script_content?: string; script_source_path?: string }) => fetchApi<Task>('/tasks', {
+  create: (data: Partial<Task> & { 
+    task_type?: 'simple' | 'daemon';
+    script_content?: string;
+    target_script?: string;
+    process_name?: string;
+    auto_restart?: boolean;
+    restart_delay?: number;
+    max_restarts?: number;
+  }) => fetchApi<Task>('/tasks', {
     method: 'POST',
     body: JSON.stringify(data),
   }),
@@ -100,6 +108,31 @@ export const logsApi = {
 export const executorsApi = {
   getInfo: () => fetchApi<Executor>('/executors'),
   validateCron: (cron: string) => fetchApi<{ valid: boolean; cron?: string; error?: string }>(`/executors/validate-cron?cron=${encodeURIComponent(cron)}`),
+};
+
+// Templates API
+export const templatesApi = {
+  list: () => fetchApi<{ templates: Array<{ id: string; name: string; description: string; features: string[] }> }>('/templates'),
+  previewDaemon: (params: {
+    target_script: string;
+    process_name: string;
+    working_dir?: string;
+    env_vars?: string;
+    auto_restart?: boolean;
+    restart_delay?: number;
+    max_restarts?: number;
+  }) => fetchApi<{ template_id: string; script: string }>('/templates/daemon/preview', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  }),
+  previewSimple: (params: {
+    script_content: string;
+    working_dir?: string;
+    env_vars?: string;
+  }) => fetchApi<{ template_id: string; script: string }>('/templates/simple/preview', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  }),
 };
 
 // Settings API
