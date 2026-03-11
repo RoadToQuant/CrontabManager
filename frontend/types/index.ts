@@ -9,7 +9,7 @@ export interface Task {
   custom_log_path?: string;
   working_dir?: string;
   env_vars?: string;
-  status: 'enabled' | 'disabled';
+  status: 'enabled' | 'disabled' | 'suspended';
   created_at: string;
   updated_at: string;
 }
