@@ -35,7 +35,7 @@ export default function SettingsPage() {
     setSyncing(true);
     try {
       const result = await settingsApi.syncCrontab();
-      alert(`同步完成！\n新增: ${result.added.length}\n移除: ${result.removed.length}\n更新: ${result.updated.length}`);
+      alert(`同步完成！\n从 crontab 读取任务: ${result.tasks_count}\n清理孤儿目录: ${result.removed_dirs.length}`);
       loadSettings();
     } catch (error) {
       alert('同步失败: ' + (error as Error).message);
