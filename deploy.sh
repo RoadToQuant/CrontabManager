@@ -268,6 +268,15 @@ SCRIPT
 
 chmod +x "$PROJECT_PATH/status.sh"
 
+# Copy development and production scripts if they exist
+if [ -f "$PROJECT_PATH/start_dev.sh" ]; then
+    chmod +x "$PROJECT_PATH/start_dev.sh"
+fi
+
+if [ -f "$PROJECT_PATH/start_prod.sh" ]; then
+    chmod +x "$PROJECT_PATH/start_prod.sh"
+fi
+
 # Create .env from example if not exists
 if [ ! -f "$PROJECT_PATH/.env" ]; then
     if [ -f "$PROJECT_PATH/.env.example" ]; then
@@ -298,8 +307,9 @@ echo "  1. Edit $PROJECT_PATH/.env for backend settings"
 echo "  2. Edit $FRONTEND_DIR/.env.local for frontend settings"
 echo ""
 echo "Start services:"
-echo "  cd $PROJECT_PATH"
-echo "  ./start.sh"
+echo "  Development:  ./start_dev.sh   (with hot reload)"
+echo "  Production:   ./start_prod.sh  (optimized, background)"
+echo "  Simple:       ./start.sh       (basic foreground mode)"
 echo ""
 echo "Stop services:"
 echo "  ./stop.sh"
@@ -308,6 +318,6 @@ echo "Check status:"
 echo "  ./status.sh"
 echo ""
 echo "Access:"
-echo "  Frontend: http://localhost:3000 (or FRONTEND_PORT in .env)"
-echo "  Backend: http://localhost:8000 (or BACKEND_PORT in .env)"
+echo "  Frontend: http://localhost:$FRONTEND_PORT"
+echo "  Backend:  http://$BACKEND_HOST:$BACKEND_PORT"
 echo ""

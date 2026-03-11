@@ -320,14 +320,55 @@ Then restart services:
 
 After deployment, the following scripts are available in the project root:
 
-| Script | Description |
-|--------|-------------|
-| `./start.sh` | Start backend and frontend services |
-| `./stop.sh` | Stop all services |
-| `./status.sh` | Check if services are running |
-| `./deploy.sh` | Deploy/Install dependencies |
+| Script | Environment | Description |
+|--------|-------------|-------------|
+| `./start_dev.sh` | Development | Hot reload mode for both frontend and backend |
+| `./start_prod.sh` | Production | Multi-process optimized, runs in background |
+| `./start.sh` | Simple | Basic foreground mode for quick testing |
+| `./stop.sh` | - | Stop all services |
+| `./status.sh` | - | Check service status |
+| `./deploy.sh` | - | Deploy/Install dependencies |
 
 All scripts read port configuration from `.env` file.
+
+#### Development (start_dev.sh)
+
+For development and debugging with hot reload support:
+
+```bash
+./start_dev.sh
+```
+
+Features:
+- **Backend hot reload**: Auto-restart when Python code changes
+- **Frontend hot reload**: Auto-refresh browser when React components change
+- **Real-time logs**: Logs displayed directly in terminal
+- **Ctrl+C to stop**: Stop all services with one key
+
+#### Production (start_prod.sh)
+
+For production deployment with high performance:
+
+```bash
+# First start
+./start_prod.sh
+
+# Restart (stops existing services first)
+./start_prod.sh --restart
+```
+
+Features:
+- **Multi-process backend**: Multiple worker processes (default 4)
+- **Frontend build**: Auto runs `npm run build` for optimized version
+- **Background mode**: Services run in background, no terminal occupation
+- **Log files**: Logs written to `logs/` directory
+- **Port check**: Auto detects port conflicts
+
+Production environment variable:
+```bash
+# .env
+BACKEND_WORKERS=4  # Adjust based on CPU cores
+```
 
 ### Makefile Commands
 
