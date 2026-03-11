@@ -16,15 +16,111 @@ import {
   PowerOff,
   RefreshCw,
   FileText,
+  Pause,
+  PlayCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import { tasksApi } from '@/lib/api';
 import { Task } from '@/types';
 import { formatDistanceToNow } from '@/lib/date';
 
+// Delete options dialog component
+function DeleteDialog({ 
+  isOpen, 
+  onClose, 
+  onConfirm, 
+  taskName 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  onConfirm: (options: { deleteScript: boolean; deleteLog: boolean }) => void;
+  taskName: string;
+}) {
+  const [deleteScript, setDeleteScript] = useState(true);
+  const [deleteLog, setDeleteLog] = useState(true);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+        <div className="flex items-center gap-3 mb-4">
+          <AlertTriangle className="w-6 h-6 text-red-500" />
+          <h3 className="text-lg font-semibold text-gray-900">删除任务</h3>
+        </div>
+        <p className="text-gray-600 mb-4">
+          确定要删除任务 <span className="font-medium text-gray-900">"{taskName}"</span> 吗？
+        </p>
+        <p className="text-sm text-gray-500 mb-4">
+          此操作将从 crontab 中移除任务记录，以下选项决定如何处理相关文件：
+        </p>
+        
+        <div className="space-y-3 mb-6">
+          <label className="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+            <input
+              type="checkbox"
+              checked={deleteScript}
+              onChange={(e) => setDeleteScript(e.target.checked)}
+              className="w-4 h-4 text-primary-600 rounded"
+            />
+            <div>
+              <p className="font-medium text-gray-900">删除脚本文件</p>
+              <p className="text-sm text-gray-500">删除任务的 bash 脚本</p>
+            </div>
+          </label>
+          
+          <label className="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+            <input
+              type="checkbox"
+              checked={deleteLog}
+              onChange={(e) => setDeleteLog(e.target.checked)}
+              className="w-4 h-4 text-primary-600 rounded"
+            />
+            <div>
+              <p className="font-medium text-gray-900">删除日志文件</p>
+              <p className="text-sm text-gray-500">删除任务的执行日志</p>
+            </div>
+          </label>
+          
+          <button
+            onClick={() => {
+              setDeleteScript(true);
+              setDeleteLog(true);
+            }}
+            className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+          >
+            全选（删除所有文件）
+          </button>
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            取消
+          </button>
+          <button
+            onClick={() => onConfirm({ deleteScript, deleteLog })}
+            className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+          >
+            删除
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [runningTasks, setRunningTasks] = useState<Set<number>>(new Set());
+  const [deleteDialog, setDeleteDialog] = useState<{ isOpen: boolean; taskId: number | null; taskName: string }>({
+    isOpen: false,
+    taskId: null,
+    taskName: '',
+  });
 
   useEffect(() => {
     loadTasks();
@@ -72,10 +168,38 @@ export default function TasksPage() {
     }
   };
 
-  const handleDelete = async (taskId: number) => {
-    if (!confirm('确定要删除这个任务吗？这将同时从 crontab 中移除。')) return;
+  const handleSuspend = async (taskId: number) => {
     try {
-      await tasksApi.delete(taskId);
+      await tasksApi.suspend(taskId);
+      loadTasks();
+    } catch (error) {
+      alert('Failed to suspend task: ' + (error as Error).message);
+    }
+  };
+
+  const handleResume = async (taskId: number) => {
+    try {
+      await tasksApi.resume(taskId);
+      loadTasks();
+    } catch (error) {
+      alert('Failed to resume task: ' + (error as Error).message);
+    }
+  };
+
+  const openDeleteDialog = (taskId: number, taskName: string) => {
+    setDeleteDialog({ isOpen: true, taskId, taskName });
+  };
+
+  const closeDeleteDialog = () => {
+    setDeleteDialog({ isOpen: false, taskId: null, taskName: '' });
+  };
+
+  const handleDelete = async (options: { deleteScript: boolean; deleteLog: boolean }) => {
+    if (deleteDialog.taskId === null) return;
+    
+    try {
+      await tasksApi.delete(deleteDialog.taskId, options);
+      closeDeleteDialog();
       loadTasks();
     } catch (error) {
       alert('Failed to delete task: ' + (error as Error).message);
@@ -95,8 +219,34 @@ export default function TasksPage() {
   const getStatusIcon = (task: Task) => {
     if (task.status === 'enabled') {
       return <CheckCircle className="w-5 h-5 text-green-500" />;
+    } else if (task.status === 'suspended') {
+      return <Pause className="w-5 h-5 text-yellow-500" />;
     }
     return <XCircle className="w-5 h-5 text-gray-400" />;
+  };
+
+  const getStatusBadge = (task: Task) => {
+    if (task.status === 'enabled') {
+      return (
+        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+          <Power className="w-3 h-3 mr-1" />
+          已启用
+        </span>
+      );
+    } else if (task.status === 'suspended') {
+      return (
+        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+          <Pause className="w-3 h-3 mr-1" />
+          已暂停
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+        <PowerOff className="w-3 h-3 mr-1" />
+        已禁用
+      </span>
+    );
   };
 
   if (loading) {
@@ -174,17 +324,7 @@ export default function TasksPage() {
                     <code className="text-sm bg-gray-100 px-2 py-1 rounded font-mono">{task.cron}</code>
                   </td>
                   <td className="px-6 py-4">
-                    {task.status === 'enabled' ? (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        <Power className="w-3 h-3 mr-1" />
-                        已启用
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                        <PowerOff className="w-3 h-3 mr-1" />
-                        已禁用
-                      </span>
-                    )}
+                    {getStatusBadge(task)}
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center justify-end gap-2">
@@ -200,17 +340,41 @@ export default function TasksPage() {
                           <Play className="w-4 h-4" />
                         )}
                       </button>
-                      <button
-                        onClick={() => handleToggle(task.id)}
-                        className={`p-2 rounded-lg transition-colors ${
-                          task.status === 'enabled'
-                            ? 'text-orange-600 hover:bg-orange-50'
-                            : 'text-green-600 hover:bg-green-50'
-                        }`}
-                        title={task.status === 'enabled' ? '禁用' : '启用'}
-                      >
-                        {task.status === 'enabled' ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
-                      </button>
+                      
+                      {/* 暂停/重启按钮 */}
+                      {task.status === 'suspended' ? (
+                        <button
+                          onClick={() => handleResume(task.id)}
+                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="重启任务"
+                        >
+                          <PlayCircle className="w-4 h-4" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleSuspend(task.id)}
+                          className="p-2 text-yellow-600 hover:bg-yellow-50 rounded-lg transition-colors"
+                          title="暂停任务"
+                        >
+                          <Pause className="w-4 h-4" />
+                        </button>
+                      )}
+                      
+                      {/* 启用/禁用切换按钮（仅非暂停状态） */}
+                      {task.status !== 'suspended' && (
+                        <button
+                          onClick={() => handleToggle(task.id)}
+                          className={`p-2 rounded-lg transition-colors ${
+                            task.status === 'enabled'
+                              ? 'text-orange-600 hover:bg-orange-50'
+                              : 'text-green-600 hover:bg-green-50'
+                          }`}
+                          title={task.status === 'enabled' ? '禁用' : '启用'}
+                        >
+                          {task.status === 'enabled' ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
+                        </button>
+                      )}
+                      
                       <Link
                         href={`/tasks/${task.id}`}
                         className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -226,7 +390,7 @@ export default function TasksPage() {
                         <FileText className="w-4 h-4" />
                       </Link>
                       <button
-                        onClick={() => handleDelete(task.id)}
+                        onClick={() => openDeleteDialog(task.id, task.name)}
                         className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                         title="删除"
                       >
@@ -248,8 +412,17 @@ export default function TasksPage() {
           <li>即使管理器停止，crontab 中的任务仍会按计划执行</li>
           <li>脚本文件保存在 backend/data/scripts/ 目录</li>
           <li>执行日志保存在各任务目录的 cron.log 文件中</li>
+          <li><strong>已暂停</strong>的任务保留在 crontab（已注释），可随时重启恢复</li>
         </ul>
       </div>
+
+      {/* Delete Dialog */}
+      <DeleteDialog
+        isOpen={deleteDialog.isOpen}
+        onClose={closeDeleteDialog}
+        onConfirm={handleDelete}
+        taskName={deleteDialog.taskName}
+      />
     </div>
   );
 }

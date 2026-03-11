@@ -267,12 +267,15 @@ class CrontabManager:
         return False
     
     def toggle_task(self, task_id: int) -> bool:
-        """Toggle task enabled/disabled status."""
+        """Toggle task enabled/disabled status.
+        
+        Note: suspended tasks cannot be toggled directly, must use resume first.
+        """
         task = self.get_task(task_id)
-        if not task:
+        if not task or task.status == "suspended":
             return False
         
-        # Toggle status
+        # Toggle between enabled/disabled
         task.status = "disabled" if task.status == "enabled" else "enabled"
         task.updated_at = datetime.utcnow().isoformat()
         
@@ -283,6 +286,88 @@ class CrontabManager:
             script_content = script_path.read_text(encoding='utf-8')
         
         return self.add_or_update_task(task, script_content) is not None
+    
+    def suspend_task(self, task_id: int) -> bool:
+        """Suspend a task - comment out in crontab and mark as suspended.
+        
+        The task remains in crontab (commented) and can be resumed later.
+        """
+        task = self.get_task(task_id)
+        if not task:
+            return False
+        
+        # Set status to suspended
+        task.status = "suspended"
+        task.updated_at = datetime.utcnow().isoformat()
+        
+        # Read existing script content
+        script_path = Path(task.script_path) if task.script_path else self.scripts_dir / f"task_{task_id}" / "run.sh"
+        script_content = ""
+        if script_path.exists():
+            script_content = script_path.read_text(encoding='utf-8')
+        
+        return self.add_or_update_task(task, script_content) is not None
+    
+    def resume_task(self, task_id: int) -> bool:
+        """Resume a suspended task - uncomment in crontab and enable.
+        
+        Only suspended tasks can be resumed.
+        """
+        task = self.get_task(task_id)
+        if not task or task.status != "suspended":
+            return False
+        
+        # Set status to enabled
+        task.status = "enabled"
+        task.updated_at = datetime.utcnow().isoformat()
+        
+        # Read existing script content
+        script_path = Path(task.script_path) if task.script_path else self.scripts_dir / f"task_{task_id}" / "run.sh"
+        script_content = ""
+        if script_path.exists():
+            script_content = script_path.read_text(encoding='utf-8')
+        
+        return self.add_or_update_task(task, script_content) is not None
+    
+    def delete_task_with_options(self, task_id: int, 
+                                  delete_script: bool = True,
+                                  delete_log: bool = True) -> bool:
+        """Delete a task with options to keep or remove files.
+        
+        Args:
+            task_id: Task ID to delete
+            delete_script: Whether to delete script files
+            delete_log: Whether to delete log files
+            
+        Returns:
+            True if successful
+        """
+        # Remove from crontab
+        content = self._get_crontab_content()
+        content = self._remove_task_from_content(task_id, content)
+        
+        if not self._set_crontab_content(content):
+            return False
+        
+        # Handle file cleanup based on options
+        task_script_dir = self.scripts_dir / f"task_{task_id}"
+        if task_script_dir.exists():
+            if delete_script and delete_log:
+                # Remove entire directory
+                shutil.rmtree(task_script_dir)
+            elif delete_log and not delete_script:
+                # Only remove log file
+                log_file = task_script_dir / "cron.log"
+                if log_file.exists():
+                    log_file.unlink()
+            elif delete_script and not delete_log:
+                # Remove script but keep log
+                script_file = task_script_dir / "run.sh"
+                if script_file.exists():
+                    script_file.unlink()
+            # If neither, keep all files
+        
+        return True
     
     def sync_from_crontab(self) -> Dict:
         """Sync from crontab - cleanup orphan script directories.

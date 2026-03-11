@@ -31,8 +31,9 @@ export const tasksApi = {
     method: 'PUT',
     body: JSON.stringify(data),
   }),
-  delete: (id: number) => fetchApi<void>(`/tasks/${id}`, {
+  delete: (id: number, options?: { deleteScript?: boolean; deleteLog?: boolean }) => fetchApi<void>(`/tasks/${id}`, {
     method: 'DELETE',
+    body: options ? JSON.stringify(options) : undefined,
   }),
   run: (id: number) => fetchApi<{ message: string; run: TaskRun }>(`/tasks/${id}/run`, {
     method: 'POST',
@@ -40,9 +41,15 @@ export const tasksApi = {
   toggle: (id: number) => fetchApi<{ message: string; status: string }>(`/tasks/${id}/toggle`, {
     method: 'POST',
   }),
+  suspend: (id: number) => fetchApi<{ message: string; status: string }>(`/tasks/${id}/suspend`, {
+    method: 'POST',
+  }),
+  resume: (id: number) => fetchApi<{ message: string; status: string }>(`/tasks/${id}/resume`, {
+    method: 'POST',
+  }),
   getRuns: (id: number) => fetchApi<TaskRun[]>(`/tasks/${id}/runs`),
   getCronLog: (id: number, lines?: number) => fetchApi<{ log: string }>(`/tasks/${id}/cron-log?lines=${lines || 100}`),
-  sync: () => fetchApi<{ added: number[]; removed: number[]; updated: number[]; errors: string[] }>('/tasks/sync', {
+  sync: () => fetchApi<{ tasks_count: number; removed_dirs: number[]; errors: string[] }>('/tasks/sync', {
     method: 'POST',
   }),
 };
@@ -99,7 +106,7 @@ export const executorsApi = {
 export const settingsApi = {
   get: () => fetchApi<{ settings: Record<string, string>; system: SystemSettings }>('/settings'),
   getRawCrontab: () => fetchApi<{ content: string }>('/settings/crontab/raw'),
-  syncCrontab: () => fetchApi<{ added: number[]; removed: number[]; updated: number[]; errors: string[] }>('/settings/crontab/sync', {
+  syncCrontab: () => fetchApi<{ tasks_count: number; removed_dirs: number[]; errors: string[] }>('/settings/crontab/sync', {
     method: 'POST',
   }),
 };

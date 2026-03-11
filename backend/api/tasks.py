@@ -31,6 +31,13 @@ class TaskUpdate(BaseModel):
     env_vars: Optional[str] = None
 
 
+class DeleteOptions(BaseModel):
+    """Options for task deletion."""
+    delete_script: bool = True  # 删除脚本文件
+    delete_log: bool = True     # 删除日志文件
+    # Note: Task record is always removed from crontab (cannot be kept)
+
+
 @router.get("")
 def list_tasks():
     """Get all tasks from crontab."""
@@ -125,12 +132,24 @@ def update_task(task_id: int, task_data: TaskUpdate):
 
 
 @router.delete("/{task_id}")
-def delete_task(task_id: int):
-    """Delete a task."""
+def delete_task(task_id: int, options: Optional[DeleteOptions] = None):
+    """Delete a task with options.
+    
+    Args:
+        options: DeleteOptions with delete_script and delete_log flags.
+                If not provided, both script and log will be deleted.
+    """
     if not crontab_manager.get_task(task_id):
         raise HTTPException(status_code=404, detail="Task not found")
     
-    if crontab_manager.delete_task(task_id):
+    # Default options
+    delete_script = True
+    delete_log = True
+    if options:
+        delete_script = options.delete_script
+        delete_log = options.delete_log
+    
+    if crontab_manager.delete_task_with_options(task_id, delete_script, delete_log):
         return {"message": "Task deleted successfully"}
     
     raise HTTPException(status_code=500, detail="Failed to delete task from crontab")
@@ -138,15 +157,60 @@ def delete_task(task_id: int):
 
 @router.post("/{task_id}/toggle")
 def toggle_task(task_id: int):
-    """Toggle task enabled/disabled status."""
-    if not crontab_manager.get_task(task_id):
+    """Toggle task enabled/disabled status.
+    
+    Note: suspended tasks cannot be toggled. Use resume for suspended tasks.
+    """
+    task = crontab_manager.get_task(task_id)
+    if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    
+    if task.status == "suspended":
+        raise HTTPException(status_code=400, detail="Suspended tasks cannot be toggled. Use resume instead.")
     
     if crontab_manager.toggle_task(task_id):
         task = crontab_manager.get_task(task_id)
         return {"message": f"Task {task.status}", "status": task.status}
     
     raise HTTPException(status_code=500, detail="Failed to update crontab")
+
+
+@router.post("/{task_id}/suspend")
+def suspend_task(task_id: int):
+    """Suspend a task - comment out in crontab but keep all files.
+    
+    Suspended tasks can be resumed later.
+    """
+    task = crontab_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if task.status == "suspended":
+        return {"message": "Task is already suspended", "status": "suspended"}
+    
+    if crontab_manager.suspend_task(task_id):
+        return {"message": "Task suspended", "status": "suspended"}
+    
+    raise HTTPException(status_code=500, detail="Failed to suspend task")
+
+
+@router.post("/{task_id}/resume")
+def resume_task(task_id: int):
+    """Resume a suspended task - re-enable in crontab.
+    
+    Only suspended tasks can be resumed.
+    """
+    task = crontab_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if task.status != "suspended":
+        raise HTTPException(status_code=400, detail="Only suspended tasks can be resumed")
+    
+    if crontab_manager.resume_task(task_id):
+        return {"message": "Task resumed", "status": "enabled"}
+    
+    raise HTTPException(status_code=500, detail="Failed to resume task")
 
 
 @router.post("/{task_id}/run")

@@ -5,7 +5,13 @@ from pydantic import BaseModel, Field
 
 
 class Task(BaseModel):
-    """Task model - all data stored in crontab comments."""
+    """Task model - all data stored in crontab comments.
+    
+    Status values:
+    - enabled: 任务在 crontab 中启用（未注释）
+    - disabled: 任务在 crontab 中禁用（已注释），但保留在 crontab 中
+    - suspended: 任务暂停（已注释），通过 API 管理，可重启恢复
+    """
     id: int
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = ""
@@ -13,13 +19,21 @@ class Task(BaseModel):
     script_path: Optional[str] = None  # Runtime computed, not stored
     working_dir: Optional[str] = ""
     env_vars: Optional[str] = "{}"  # JSON string
-    status: str = "enabled"  # enabled/disabled
+    status: str = "enabled"  # enabled/disabled/suspended
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     
     def to_dict(self):
         """Convert to dictionary."""
         return self.model_dump()
+    
+    def is_active(self) -> bool:
+        """Check if task is active (enabled)."""
+        return self.status == "enabled"
+    
+    def is_suspended(self) -> bool:
+        """Check if task is suspended."""
+        return self.status == "suspended"
 
 
 class TaskRun(BaseModel):
