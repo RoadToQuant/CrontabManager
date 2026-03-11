@@ -1,7 +1,12 @@
 #!/bin/bash
 
 # Crontab Manager - Ubuntu 22.04 Deploy Script
-# Usage: ./deploy.sh [project_path]
+# Usage: ./deploy.sh [options] [project_path]
+# Options:
+#   --fresh    Force create new virtual environment
+#   --conda    Use conda environment (must be configured in .env)
+#   --venv     Use venv (default)
+#   -h, --help Show help
 # Default path: /opt/script-monitor
 
 set -e
@@ -9,9 +14,61 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m'
 
-PROJECT_PATH="${1:-/opt/script-monitor}"
+# Parse arguments
+FRESH_INSTALL=false
+USE_CONDA=false
+USE_VENV=true
+PROJECT_PATH=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --fresh)
+            FRESH_INSTALL=true
+            shift
+            ;;
+        --conda)
+            USE_CONDA=true
+            USE_VENV=false
+            shift
+            ;;
+        --venv)
+            USE_CONDA=false
+            USE_VENV=true
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: ./deploy.sh [options] [project_path]"
+            echo ""
+            echo "Options:"
+            echo "  --fresh     Force create new virtual environment"
+            echo "  --conda     Use conda environment (configure .env first)"
+            echo "  --venv      Use venv (default)"
+            echo "  -h, --help  Show this help message"
+            echo ""
+            echo "Examples:"
+            echo "  ./deploy.sh                           # Auto-detect environment"
+            echo "  ./deploy.sh --fresh                   # Create fresh venv"
+            echo "  ./deploy.sh --conda                   # Use conda environment"
+            echo "  ./deploy.sh /opt/crontab-manager      # Deploy to custom path"
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1"
+            echo "Use -h or --help for usage information"
+            exit 1
+            ;;
+        *)
+            PROJECT_PATH="$1"
+            shift
+            ;;
+    esac
+done
+
+# Set default project path
+PROJECT_PATH="${PROJECT_PATH:-/opt/script-monitor}"
 BACKEND_DIR="$PROJECT_PATH/backend"
 FRONTEND_DIR="$PROJECT_PATH/frontend"
 
@@ -20,6 +77,23 @@ echo -e "${GREEN}  Crontab Manager Deploy Script${NC}"
 echo -e "${GREEN}================================${NC}"
 echo ""
 echo "Project Path: $PROJECT_PATH"
+
+# Load existing .env if present
+if [ -f "$PROJECT_PATH/.env" ]; then
+    set -a
+    source "$PROJECT_PATH/.env"
+    set +a
+    echo "Loaded existing .env configuration"
+fi
+
+# Determine Python environment type
+if [ "$USE_CONDA" = true ]; then
+    PYTHON_ENV_TYPE="conda"
+elif [ "$USE_VENV" = true ] && [ -z "$PYTHON_ENV_TYPE" ]; then
+    PYTHON_ENV_TYPE="venv"
+fi
+
+echo "Python Environment: $PYTHON_ENV_TYPE"
 echo ""
 
 if [ "$EUID" -eq 0 ]; then
@@ -76,60 +150,137 @@ chmod -R 755 "$BACKEND_DIR/data"
 
 echo -e "${GREEN}  Data directories created${NC}"
 
-echo -e "${YELLOW}[4/6] Installing backend dependencies...${NC}"
+echo -e "${YELLOW}[4/6] Setting up Python environment...${NC}"
 
-mkdir -p ~/.pip
-cat > ~/.pip/pip.conf << 'EOF'
+cd "$BACKEND_DIR"
+
+if [ "$PYTHON_ENV_TYPE" == "conda" ]; then
+    # Conda environment setup
+    CONDA_ACTIVATE="${CONDA_ACTIVATE:-/home/ubuntu/miniconda3/bin/activate}"
+    CONDA_ENV="${CONDA_ENV:-py39-sm}"
+    
+    if [ -f "$CONDA_ACTIVATE" ]; then
+        source "$CONDA_ACTIVATE"
+        
+        # Check if environment exists
+        if conda env list | grep -q "$CONDA_ENV"; then
+            echo -e "${GREEN}  Found conda environment: $CONDA_ENV${NC}"
+            conda activate "$CONDA_ENV"
+            
+            # Install/update dependencies
+            pip install --upgrade pip -q
+            pip install -r requirements.txt -q
+            
+            echo -e "${GREEN}  Dependencies installed in conda environment${NC}"
+        else
+            echo -e "${RED}Error: Conda environment '$CONDA_ENV' not found${NC}"
+            echo "Please create it first: conda create -n $CONDA_ENV python=3.9"
+            exit 1
+        fi
+    else
+        echo -e "${RED}Error: Conda not found at $CONDA_ACTIVATE${NC}"
+        echo "Please install Miniconda or configure CONDA_ACTIVATE in .env"
+        exit 1
+    fi
+else
+    # Virtual environment setup
+    if [ "$FRESH_INSTALL" = true ] && [ -d "venv" ]; then
+        echo "  Removing old venv..."
+        rm -rf venv
+    fi
+    
+    if [ -d "venv" ]; then
+        echo -e "${GREEN}  Found existing venv${NC}"
+    else
+        echo "  Creating new Python virtual environment..."
+        python3 -m venv venv
+    fi
+    
+    source venv/bin/activate
+    
+    # Configure pip to use Alibaba mirror
+    mkdir -p ~/.pip
+    cat > ~/.pip/pip.conf << 'EOF'
 [global]
 index-url = https://mirrors.aliyun.com/pypi/simple/
 trusted-host = mirrors.aliyun.com
 EOF
-
-cd "$BACKEND_DIR"
-
-if [ ! -d "venv" ]; then
-    echo "  Creating Python virtual environment..."
-    python3 -m venv venv
+    
+    pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ -q
+    pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ -q
+    
+    echo -e "${GREEN}  Dependencies installed in venv${NC}"
 fi
-
-source venv/bin/activate
-pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ -q
-pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ -q
-
-echo -e "${GREEN}  Backend dependencies installed${NC}"
 
 echo -e "${YELLOW}[5/6] Installing frontend dependencies...${NC}"
 
 cd "$FRONTEND_DIR"
-npm install
 
-echo -e "${GREEN}  Frontend dependencies installed${NC}"
+if [ ! -d "node_modules" ] || [ "$FRESH_INSTALL" = true ]; then
+    if [ "$FRESH_INSTALL" = true ] && [ -d "node_modules" ]; then
+        echo "  Removing old node_modules..."
+        rm -rf node_modules
+    fi
+    npm install
+else
+    echo -e "${GREEN}  Found existing node_modules${NC}"
+fi
+
+echo -e "${GREEN}  Frontend dependencies ready${NC}"
 
 echo -e "${YELLOW}[6/6] Creating startup scripts...${NC}"
 
-# Create start.sh
-cat > "$PROJECT_PATH/start.sh" << 'SCRIPT'
+# Helper function to create scripts
+create_start_script() {
+    local script_name="$1"
+    local script_mode="$2"  # dev, prod, or simple
+    
+    cat > "$PROJECT_PATH/$script_name" << 'SCRIPT'
 #!/bin/bash
 cd "$(dirname "$0")"
 PROJECT_PATH="$(pwd)"
 
-# Load environment variables from .env file
+# Load environment variables
 if [ -f "$PROJECT_PATH/.env" ]; then
-    export $(grep -v '^#' "$PROJECT_PATH/.env" | xargs)
+    set -a
+    source "$PROJECT_PATH/.env"
+    set +a
 fi
 
-# Default values
 BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+PYTHON_ENV_TYPE="${PYTHON_ENV_TYPE:-venv}"
 
 echo "================================"
-echo "  Crontab Manager Startup Script"
+echo "  Crontab Manager"
 echo "================================"
 echo ""
 echo "Backend: $BACKEND_HOST:$BACKEND_PORT"
 echo "Frontend: http://localhost:$FRONTEND_PORT"
+echo "Python Env: $PYTHON_ENV_TYPE"
 echo ""
+
+activate_python_env() {
+    if [ "$PYTHON_ENV_TYPE" == "conda" ]; then
+        if [ -f "$CONDA_ACTIVATE" ]; then
+            source "$CONDA_ACTIVATE"
+            conda activate "$CONDA_ENV"
+            echo "  Activated conda: $CONDA_ENV"
+        else
+            echo "Error: Conda not found at $CONDA_ACTIVATE"
+            exit 1
+        fi
+    else
+        if [ -f "venv/bin/activate" ]; then
+            source venv/bin/activate
+            echo "  Activated venv"
+        else
+            echo "Error: venv not found. Run ./deploy.sh first."
+            exit 1
+        fi
+    fi
+}
 
 check_port() {
     if lsof -Pi :$1 -sTCP:LISTEN -t >/dev/null 2>&1; then
@@ -139,23 +290,9 @@ check_port() {
     fi
 }
 
-echo "[1/2] Starting backend service..."
+echo "[1/2] Starting backend..."
 cd "$PROJECT_PATH/backend"
-
-# Activate Python environment based on configuration
-if [ "$PYTHON_ENV_TYPE" == "conda" ]; then
-    if [ -f "$CONDA_ACTIVATE" ]; then
-        source "$CONDA_ACTIVATE"
-        conda activate "$CONDA_ENV"
-        echo "  Activated conda environment: $CONDA_ENV"
-    else
-        echo "  Error: Conda not found at $CONDA_ACTIVATE"
-        exit 1
-    fi
-else
-    source venv/bin/activate
-    echo "  Activated venv environment"
-fi
+activate_python_env
 
 if check_port "$BACKEND_PORT"; then
     nohup python main.py > ../logs/backend.log 2>&1 &
@@ -164,7 +301,7 @@ else
     echo "  Warning: Port $BACKEND_PORT is already in use"
 fi
 
-echo "[2/2] Starting frontend service..."
+echo "[2/2] Starting frontend..."
 cd "$PROJECT_PATH/frontend"
 
 if check_port "$FRONTEND_PORT"; then
@@ -182,120 +319,24 @@ echo "  Backend: http://$BACKEND_HOST:$BACKEND_PORT"
 echo "================================"
 SCRIPT
 
-chmod +x "$PROJECT_PATH/start.sh"
-
-# Create stop.sh
-cat > "$PROJECT_PATH/stop.sh" << 'SCRIPT'
-#!/bin/bash
-cd "$(dirname "$0")" 2>/dev/null || cd "$(dirname "$BASH_SOURCE")"
-PROJECT_PATH="$(pwd)"
-
-# Load environment variables from .env file
-if [ -f "$PROJECT_PATH/.env" ]; then
-    export $(grep -v '^#' "$PROJECT_PATH/.env" | xargs)
-fi
-
-BACKEND_PORT="${BACKEND_PORT:-8000}"
-FRONTEND_PORT="${FRONTEND_PORT:-3000}"
-
-echo "================================"
-echo "  Stopping Crontab Manager"
-echo "================================"
-echo ""
-
-# Stop backend
-echo "[1/2] Stopping backend service..."
-BACKEND_PID=$(lsof -Pi :"$BACKEND_PORT" -sTCP:LISTEN -t 2>/dev/null)
-if [ -n "$BACKEND_PID" ]; then
-    kill "$BACKEND_PID" 2>/dev/null || kill -9 "$BACKEND_PID" 2>/dev/null
-    echo "  Backend stopped (PID: $BACKEND_PID)"
-else
-    # Fallback to process name
-    pkill -f "python main.py" 2>/dev/null || true
-    echo "  Backend process stopped"
-fi
-
-# Stop frontend
-echo "[2/2] Stopping frontend service..."
-FRONTEND_PID=$(lsof -Pi :"$FRONTEND_PORT" -sTCP:LISTEN -t 2>/dev/null)
-if [ -n "$FRONTEND_PID" ]; then
-    kill "$FRONTEND_PID" 2>/dev/null || kill -9 "$FRONTEND_PID" 2>/dev/null
-    echo "  Frontend stopped (PID: $FRONTEND_PID)"
-else
-    # Fallback to process name
-    pkill -f "npm run dev" 2>/dev/null || true
-    echo "  Frontend process stopped"
-fi
-
-echo ""
-echo "================================"
-echo "  All services stopped"
-echo "================================"
-SCRIPT
-
-chmod +x "$PROJECT_PATH/stop.sh"
-
-# Create status.sh
-cat > "$PROJECT_PATH/status.sh" << 'SCRIPT'
-#!/bin/bash
-cd "$(dirname "$0")" 2>/dev/null || cd "$(dirname "$BASH_SOURCE")"
-PROJECT_PATH="$(pwd)"
-
-# Load environment variables from .env file
-if [ -f "$PROJECT_PATH/.env" ]; then
-    export $(grep -v '^#' "$PROJECT_PATH/.env" | xargs)
-fi
-
-BACKEND_PORT="${BACKEND_PORT:-8000}"
-FRONTEND_PORT="${FRONTEND_PORT:-3000}"
-
-echo "================================"
-echo "  Crontab Manager Status"
-echo "================================"
-echo ""
-
-check_port() {
-    if lsof -Pi :$1 -sTCP:LISTEN -t >/dev/null 2>&1; then
-        return 0
-    else
-        return 1
-    fi
+    chmod +x "$PROJECT_PATH/$script_name"
 }
 
-if check_port "$BACKEND_PORT"; then
-    BACKEND_PID=$(lsof -Pi :"$BACKEND_PORT" -sTCP:LISTEN -t 2>/dev/null)
-    echo "Backend:  Running (PID: $BACKEND_PID, Port: $BACKEND_PORT)"
-else
-    echo "Backend:  Stopped (Port: $BACKEND_PORT)"
-fi
+# Create basic start.sh
+create_start_script "start.sh" "simple"
 
-if check_port "$FRONTEND_PORT"; then
-    FRONTEND_PID=$(lsof -Pi :"$FRONTEND_PORT" -sTCP:LISTEN -t 2>/dev/null)
-    echo "Frontend: Running (PID: $FRONTEND_PID, Port: $FRONTEND_PORT)"
-else
-    echo "Frontend: Stopped (Port: $FRONTEND_PORT)"
-fi
-
-echo ""
-echo "================================"
-SCRIPT
-
-chmod +x "$PROJECT_PATH/status.sh"
-
-# Copy development and production scripts if they exist
-if [ -f "$PROJECT_PATH/start_dev.sh" ]; then
-    chmod +x "$PROJECT_PATH/start_dev.sh"
-fi
-
-if [ -f "$PROJECT_PATH/start_prod.sh" ]; then
-    chmod +x "$PROJECT_PATH/start_prod.sh"
-fi
+# Copy dev and prod scripts if exist
+for script in start_dev.sh start_prod.sh stop.sh status.sh; do
+    if [ -f "$PROJECT_PATH/$script" ]; then
+        chmod +x "$PROJECT_PATH/$script"
+    fi
+done
 
 # Create .env from example if not exists
 if [ ! -f "$PROJECT_PATH/.env" ]; then
     if [ -f "$PROJECT_PATH/.env.example" ]; then
         cp "$PROJECT_PATH/.env.example" "$PROJECT_PATH/.env"
-        echo "  Created .env from .env.example"
+        echo "  Created .env (please review and customize)"
     fi
 fi
 
@@ -315,21 +356,19 @@ echo -e "${GREEN}  Deploy Complete!${NC}"
 echo -e "${GREEN}================================${NC}"
 echo ""
 echo "Project Path: $PROJECT_PATH"
+echo "Python Environment: $PYTHON_ENV_TYPE"
 echo ""
 echo "Configuration:"
-echo "  1. Edit $PROJECT_PATH/.env for backend settings"
-echo "  2. Edit $FRONTEND_DIR/.env.local for frontend settings"
+echo "  - Review $PROJECT_PATH/.env for your settings"
 echo ""
 echo "Start services:"
-echo "  Development:  ./start_dev.sh   (with hot reload)"
-echo "  Production:   ./start_prod.sh  (optimized, background)"
-echo "  Simple:       ./start.sh       (basic foreground mode)"
+echo "  Development:  ./start_dev.sh   (hot reload)"
+echo "  Production:   ./start_prod.sh  (optimized)"
+echo "  Simple:       ./start.sh       (basic)"
 echo ""
-echo "Stop services:"
-echo "  ./stop.sh"
-echo ""
-echo "Check status:"
-echo "  ./status.sh"
+echo "Other commands:"
+echo "  Stop:    ./stop.sh"
+echo "  Status:  ./status.sh"
 echo ""
 echo "Access:"
 echo "  Frontend: http://localhost:$FRONTEND_PORT"

@@ -38,26 +38,58 @@
 
 ### 一键部署
 
+#### 方式一：使用现有 Python 环境（推荐）
+
+如果你已有配置好的 conda 或 venv 环境：
+
 ```bash
 # 克隆项目
 git clone https://github.com/RoadToQuant/CrontabManager.git
 cd CrontabManager
 
-# 部署（安装依赖）
+# 配置环境（指定你的 Python 环境）
+cp .env.example .env
+
+# 编辑 .env，设置你的环境：
+# 方式 A：使用 conda
+# PYTHON_ENV_TYPE=conda
+# CONDA_ACTIVATE=/home/ubuntu/miniconda3/bin/activate
+# CONDA_ENV=py39-sm
+#
+# 方式 B：使用 venv
+# PYTHON_ENV_TYPE=venv
+# VENV_ACTIVATE=venv/bin/activate
+
+# 部署（自动检测环境，跳过创建）
 ./deploy.sh
 
-# 配置环境（可选）
-cp .env.example .env
-cp frontend/.env.example frontend/.env.local
+# 启动服务
+./start_dev.sh
+```
+
+#### 方式二：自动创建新环境
+
+如果你没有 Python 环境，deploy.sh 会自动创建：
+
+```bash
+# 克隆项目
+git clone https://github.com/RoadToQuant/CrontabManager.git
+cd CrontabManager
+
+# 部署（自动创建 venv）
+./deploy.sh
 
 # 启动服务
-./start.sh
+./start_dev.sh
+```
 
-# 查看状态
-./status.sh
+#### 部署选项
 
-# 停止服务
-./stop.sh
+```bash
+./deploy.sh              # 自动检测：使用现有环境或创建新的
+./deploy.sh --fresh      # 强制创建新的虚拟环境（删除旧的）
+./deploy.sh --conda      # 使用 conda 环境（需提前配置 .env）
+./deploy.sh --venv       # 使用 venv（默认）
 ```
 
 访问 http://localhost:3000 （或你配置的 FRONTEND_PORT）
@@ -240,7 +272,16 @@ CrontabManager/
 cp .env.example .env
 ```
 
-**核心设置：**
+**Python 环境配置：**
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `PYTHON_ENV_TYPE` | `venv` | Python 环境类型：`venv` 或 `conda` |
+| `VENV_ACTIVATE` | `venv/bin/activate` | venv 激活脚本路径 |
+| `CONDA_ACTIVATE` | - | conda 激活脚本路径（如 `/home/ubuntu/miniconda3/bin/activate`） |
+| `CONDA_ENV` | - | conda 环境名称（如 `py39-sm`） |
+
+**服务配置：**
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
@@ -251,9 +292,14 @@ cp .env.example .env
 | `CRONTAB_USER` | (空) | crontab 用户 (空=当前用户, `root`=系统 crontab) |
 | `CRON_TASK_PREFIX` | `# script-monitor-task:` | crontab 中识别任务的前缀 |
 
-**示例 `.env`：**
+**示例 `.env` - 使用 Conda：**
 
 ```env
+# Python 环境配置
+PYTHON_ENV_TYPE=conda
+CONDA_ACTIVATE=/home/ubuntu/miniconda3/bin/activate
+CONDA_ENV=py39-sm
+
 # 后端配置
 BACKEND_HOST=0.0.0.0
 BACKEND_PORT=8000
@@ -265,9 +311,22 @@ SCRIPTS_DIR=./data/scripts
 # crontab 配置
 CRONTAB_USER=
 CRON_TASK_PREFIX=# script-monitor-task:
+```
 
-# 高级配置
-LOG_LEVEL=INFO
+**示例 `.env` - 使用 Venv：**
+
+```env
+# Python 环境配置
+PYTHON_ENV_TYPE=venv
+VENV_ACTIVATE=venv/bin/activate
+
+# 后端配置
+BACKEND_HOST=0.0.0.0
+BACKEND_PORT=8000
+
+# 数据目录
+DATA_DIR=./data
+SCRIPTS_DIR=./data/scripts
 ```
 
 ### 前端环境变量
@@ -312,6 +371,39 @@ NEXT_PUBLIC_API_URL=http://localhost:8080
 ```bash
 ./stop.sh
 ./start.sh
+```
+
+## 测试流程
+
+部署完成后，按以下步骤验证安装：
+
+```bash
+# 1. 检查环境
+cat .env | grep PYTHON_ENV_TYPE
+# 输出：PYTHON_ENV_TYPE=conda 或 PYTHON_ENV_TYPE=venv
+
+# 2. 测试后端启动
+cd backend
+# 如果是 conda：
+source /home/ubuntu/miniconda3/bin/activate && conda activate py39-sm
+# 如果是 venv：
+source venv/bin/activate
+# 启动测试
+python -c "from main import app; print('Backend OK')"
+
+# 3. 完整启动测试
+./start_dev.sh
+# 检查输出：
+# - Backend: http://0.0.0.0:8000
+# - Frontend: http://localhost:3000
+
+# 4. 访问测试
+curl http://localhost:8000/
+# 输出：{"name":"Crontab Manager",...}
+
+# 5. Web 界面测试
+# 浏览器访问 http://localhost:3000
+# 创建测试任务 → 查看 crontab -l → 验证任务已添加
 ```
 
 ## 开发

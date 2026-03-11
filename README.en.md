@@ -38,26 +38,58 @@ A web-based crontab management tool. All tasks are converted to bash scripts and
 
 ### One-Click Deploy
 
+#### Option 1: Use Existing Python Environment (Recommended)
+
+If you already have a configured conda or venv environment:
+
 ```bash
 # Clone repository
 git clone https://github.com/RoadToQuant/CrontabManager.git
 cd CrontabManager
 
-# Deploy (install dependencies)
+# Configure environment (specify your Python environment)
+cp .env.example .env
+
+# Edit .env and set your environment:
+# Option A: Using conda
+# PYTHON_ENV_TYPE=conda
+# CONDA_ACTIVATE=/home/ubuntu/miniconda3/bin/activate
+# CONDA_ENV=py39-sm
+#
+# Option B: Using venv
+# PYTHON_ENV_TYPE=venv
+# VENV_ACTIVATE=venv/bin/activate
+
+# Deploy (auto-detects environment, skips creation)
 ./deploy.sh
 
-# Configure environment (optional)
-cp .env.example .env
-cp frontend/.env.example frontend/.env.local
+# Start services
+./start_dev.sh
+```
+
+#### Option 2: Auto-Create New Environment
+
+If you don't have a Python environment, deploy.sh will create one:
+
+```bash
+# Clone repository
+git clone https://github.com/RoadToQuant/CrontabManager.git
+cd CrontabManager
+
+# Deploy (auto-creates venv)
+./deploy.sh
 
 # Start services
-./start.sh
+./start_dev.sh
+```
 
-# Check status
-./status.sh
+#### Deploy Options
 
-# Stop services
-./stop.sh
+```bash
+./deploy.sh              # Auto-detect: use existing or create new
+./deploy.sh --fresh      # Force create new virtual environment
+./deploy.sh --conda      # Use conda environment (configure .env first)
+./deploy.sh --venv       # Use venv (default)
 ```
 
 Visit http://localhost:3000 (or your configured FRONTEND_PORT)
@@ -240,7 +272,16 @@ Copy `.env.example` to `.env` and configure:
 cp .env.example .env
 ```
 
-**Core Settings:**
+**Python Environment Configuration:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PYTHON_ENV_TYPE` | `venv` | Python environment type: `venv` or `conda` |
+| `VENV_ACTIVATE` | `venv/bin/activate` | Path to venv activate script |
+| `CONDA_ACTIVATE` | - | Path to conda activate (e.g., `/home/ubuntu/miniconda3/bin/activate`) |
+| `CONDA_ENV` | - | Conda environment name (e.g., `py39-sm`) |
+
+**Service Configuration:**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -251,9 +292,14 @@ cp .env.example .env
 | `CRONTAB_USER` | (empty) | Crontab user (empty = current user, `root` = system crontab) |
 | `CRON_TASK_PREFIX` | `# script-monitor-task:` | Prefix for identifying tasks in crontab |
 
-**Example `.env`:**
+**Example `.env` - Using Conda:**
 
 ```env
+# Python Environment Configuration
+PYTHON_ENV_TYPE=conda
+CONDA_ACTIVATE=/home/ubuntu/miniconda3/bin/activate
+CONDA_ENV=py39-sm
+
 # Backend Configuration
 BACKEND_HOST=0.0.0.0
 BACKEND_PORT=8000
@@ -265,9 +311,22 @@ SCRIPTS_DIR=./data/scripts
 # Crontab Configuration
 CRONTAB_USER=
 CRON_TASK_PREFIX=# script-monitor-task:
+```
 
-# Advanced
-LOG_LEVEL=INFO
+**Example `.env` - Using Venv:**
+
+```env
+# Python Environment Configuration
+PYTHON_ENV_TYPE=venv
+VENV_ACTIVATE=venv/bin/activate
+
+# Backend Configuration
+BACKEND_HOST=0.0.0.0
+BACKEND_PORT=8000
+
+# Data directories
+DATA_DIR=./data
+SCRIPTS_DIR=./data/scripts
 ```
 
 ### Frontend Environment Variables
@@ -312,6 +371,39 @@ Then restart services:
 ```bash
 ./stop.sh
 ./start.sh
+```
+
+## Testing
+
+After deployment, verify installation with these steps:
+
+```bash
+# 1. Check environment
+cat .env | grep PYTHON_ENV_TYPE
+# Output: PYTHON_ENV_TYPE=conda or PYTHON_ENV_TYPE=venv
+
+# 2. Test backend startup
+cd backend
+# For conda:
+source /home/ubuntu/miniconda3/bin/activate && conda activate py39-sm
+# For venv:
+source venv/bin/activate
+# Test startup
+python -c "from main import app; print('Backend OK')"
+
+# 3. Full startup test
+./start_dev.sh
+# Check output:
+# - Backend: http://0.0.0.0:8000
+# - Frontend: http://localhost:3000
+
+# 4. Access test
+curl http://localhost:8000/
+# Output: {"name":"Crontab Manager",...}
+
+# 5. Web UI test
+# Browser: http://localhost:3000
+# Create test task → Run crontab -l → Verify task added
 ```
 
 ## Development
