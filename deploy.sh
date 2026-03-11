@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script Monitor - Ubuntu 22.04 Deploy Script
+# Crontab Manager - Ubuntu 22.04 Deploy Script
 # Usage: ./deploy.sh [project_path]
 # Default path: /opt/script-monitor
 
@@ -16,7 +16,7 @@ BACKEND_DIR="$PROJECT_PATH/backend"
 FRONTEND_DIR="$PROJECT_PATH/frontend"
 
 echo -e "${GREEN}================================${NC}"
-echo -e "${GREEN}  Script Monitor Deploy Script${NC}"
+echo -e "${GREEN}  Crontab Manager Deploy Script${NC}"
 echo -e "${GREEN}================================${NC}"
 echo ""
 echo "Project Path: $PROJECT_PATH"
@@ -38,6 +38,11 @@ if ! command -v node &> /dev/null; then
     exit 1
 fi
 
+if ! command -v crontab &> /dev/null; then
+    echo -e "${RED}Error: crontab not found. Install cron package.${NC}"
+    exit 1
+fi
+
 NODE_VERSION=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
 if [ "$NODE_VERSION" -lt 18 ]; then
     echo -e "${RED}Error: Node.js version too old (requires 18+)${NC}"
@@ -46,6 +51,7 @@ fi
 
 echo -e "${GREEN}  Python3: $(python3 --version)${NC}"
 echo -e "${GREEN}  Node.js: $(node --version)${NC}"
+echo -e "${GREEN}  Cron: $(crontab -V 2>/dev/null || echo 'installed')${NC}"
 
 echo -e "${YELLOW}[2/6] Checking project structure...${NC}"
 
@@ -101,14 +107,28 @@ echo -e "${GREEN}  Frontend dependencies installed${NC}"
 
 echo -e "${YELLOW}[6/6] Creating startup scripts...${NC}"
 
-cat > "$PROJECT_PATH/start.sh" << 'EOF'
+# Create start.sh
+cat > "$PROJECT_PATH/start.sh" << 'SCRIPT'
 #!/bin/bash
 cd "$(dirname "$0")"
 PROJECT_PATH="$(pwd)"
 
+# Load environment variables from .env file
+if [ -f "$PROJECT_PATH/.env" ]; then
+    export $(grep -v '^#' "$PROJECT_PATH/.env" | xargs)
+fi
+
+# Default values
+BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+
 echo "================================"
-echo "  Script Monitor Startup Script"
+echo "  Crontab Manager Startup Script"
 echo "================================"
+echo ""
+echo "Backend: $BACKEND_HOST:$BACKEND_PORT"
+echo "Frontend: http://localhost:$FRONTEND_PORT"
 echo ""
 
 check_port() {
@@ -123,46 +143,145 @@ echo "[1/2] Starting backend service..."
 cd "$PROJECT_PATH/backend"
 source venv/bin/activate
 
-if check_port 8000; then
+if check_port "$BACKEND_PORT"; then
     nohup python main.py > ../logs/backend.log 2>&1 &
     echo "  Backend started, PID: $!"
 else
-    echo "  Warning: Port 8000 is already in use"
+    echo "  Warning: Port $BACKEND_PORT is already in use"
 fi
 
 echo "[2/2] Starting frontend service..."
 cd "$PROJECT_PATH/frontend"
 
-if check_port 3000; then
+if check_port "$FRONTEND_PORT"; then
     nohup npm run dev > ../logs/frontend.log 2>&1 &
     echo "  Frontend started, PID: $!"
 else
-    echo "  Warning: Port 3000 is already in use"
+    echo "  Warning: Port $FRONTEND_PORT is already in use"
 fi
 
 echo ""
 echo "================================"
 echo "Services started"
-echo "  Frontend: http://localhost:3000"
-echo "  Backend: http://localhost:8000"
+echo "  Frontend: http://localhost:$FRONTEND_PORT"
+echo "  Backend: http://$BACKEND_HOST:$BACKEND_PORT"
 echo "================================"
-EOF
+SCRIPT
 
 chmod +x "$PROJECT_PATH/start.sh"
 
-cat > "$PROJECT_PATH/stop.sh" << 'EOF'
+# Create stop.sh
+cat > "$PROJECT_PATH/stop.sh" << 'SCRIPT'
 #!/bin/bash
-echo "Stopping Script Monitor services..."
-pkill -f "python main.py" 2>/dev/null || true
-pkill -f "npm run dev" 2>/dev/null || true
-echo "Services stopped"
-EOF
+cd "$(dirname "$0")" 2>/dev/null || cd "$(dirname "$BASH_SOURCE")"
+PROJECT_PATH="$(pwd)"
+
+# Load environment variables from .env file
+if [ -f "$PROJECT_PATH/.env" ]; then
+    export $(grep -v '^#' "$PROJECT_PATH/.env" | xargs)
+fi
+
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+
+echo "================================"
+echo "  Stopping Crontab Manager"
+echo "================================"
+echo ""
+
+# Stop backend
+echo "[1/2] Stopping backend service..."
+BACKEND_PID=$(lsof -Pi :"$BACKEND_PORT" -sTCP:LISTEN -t 2>/dev/null)
+if [ -n "$BACKEND_PID" ]; then
+    kill "$BACKEND_PID" 2>/dev/null || kill -9 "$BACKEND_PID" 2>/dev/null
+    echo "  Backend stopped (PID: $BACKEND_PID)"
+else
+    # Fallback to process name
+    pkill -f "python main.py" 2>/dev/null || true
+    echo "  Backend process stopped"
+fi
+
+# Stop frontend
+echo "[2/2] Stopping frontend service..."
+FRONTEND_PID=$(lsof -Pi :"$FRONTEND_PORT" -sTCP:LISTEN -t 2>/dev/null)
+if [ -n "$FRONTEND_PID" ]; then
+    kill "$FRONTEND_PID" 2>/dev/null || kill -9 "$FRONTEND_PID" 2>/dev/null
+    echo "  Frontend stopped (PID: $FRONTEND_PID)"
+else
+    # Fallback to process name
+    pkill -f "npm run dev" 2>/dev/null || true
+    echo "  Frontend process stopped"
+fi
+
+echo ""
+echo "================================"
+echo "  All services stopped"
+echo "================================"
+SCRIPT
 
 chmod +x "$PROJECT_PATH/stop.sh"
 
+# Create status.sh
+cat > "$PROJECT_PATH/status.sh" << 'SCRIPT'
+#!/bin/bash
+cd "$(dirname "$0")" 2>/dev/null || cd "$(dirname "$BASH_SOURCE")"
+PROJECT_PATH="$(pwd)"
+
+# Load environment variables from .env file
+if [ -f "$PROJECT_PATH/.env" ]; then
+    export $(grep -v '^#' "$PROJECT_PATH/.env" | xargs)
+fi
+
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+
+echo "================================"
+echo "  Crontab Manager Status"
+echo "================================"
+echo ""
+
+check_port() {
+    if lsof -Pi :$1 -sTCP:LISTEN -t >/dev/null 2>&1; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+if check_port "$BACKEND_PORT"; then
+    BACKEND_PID=$(lsof -Pi :"$BACKEND_PORT" -sTCP:LISTEN -t 2>/dev/null)
+    echo "Backend:  Running (PID: $BACKEND_PID, Port: $BACKEND_PORT)"
+else
+    echo "Backend:  Stopped (Port: $BACKEND_PORT)"
+fi
+
+if check_port "$FRONTEND_PORT"; then
+    FRONTEND_PID=$(lsof -Pi :"$FRONTEND_PORT" -sTCP:LISTEN -t 2>/dev/null)
+    echo "Frontend: Running (PID: $FRONTEND_PID, Port: $FRONTEND_PORT)"
+else
+    echo "Frontend: Stopped (Port: $FRONTEND_PORT)"
+fi
+
+echo ""
+echo "================================"
+SCRIPT
+
+chmod +x "$PROJECT_PATH/status.sh"
+
+# Create .env from example if not exists
 if [ ! -f "$PROJECT_PATH/.env" ]; then
-    cp "$PROJECT_PATH/.env.example" "$PROJECT_PATH/.env"
-    echo "  Created .env config file"
+    if [ -f "$PROJECT_PATH/.env.example" ]; then
+        cp "$PROJECT_PATH/.env.example" "$PROJECT_PATH/.env"
+        echo "  Created .env from .env.example"
+    fi
+fi
+
+# Create frontend .env.local if not exists
+if [ ! -f "$FRONTEND_DIR/.env.local" ]; then
+    if [ -f "$FRONTEND_DIR/.env.example" ]; then
+        cp "$FRONTEND_DIR/.env.example" "$FRONTEND_DIR/.env.local"
+        echo "  Created frontend .env.local"
+    fi
 fi
 
 echo -e "${GREEN}  Startup scripts created${NC}"
@@ -174,11 +293,21 @@ echo -e "${GREEN}================================${NC}"
 echo ""
 echo "Project Path: $PROJECT_PATH"
 echo ""
+echo "Configuration:"
+echo "  1. Edit $PROJECT_PATH/.env for backend settings"
+echo "  2. Edit $FRONTEND_DIR/.env.local for frontend settings"
+echo ""
 echo "Start services:"
 echo "  cd $PROJECT_PATH"
 echo "  ./start.sh"
 echo ""
+echo "Stop services:"
+echo "  ./stop.sh"
+echo ""
+echo "Check status:"
+echo "  ./status.sh"
+echo ""
 echo "Access:"
-echo "  Frontend: http://localhost:3000"
-echo "  Backend: http://localhost:8000"
+echo "  Frontend: http://localhost:3000 (or FRONTEND_PORT in .env)"
+echo "  Backend: http://localhost:8000 (or BACKEND_PORT in .env)"
 echo ""

@@ -41,14 +41,24 @@ A web-based crontab management tool. All tasks are converted to bash scripts and
 git clone https://github.com/RoadToQuant/CrontabManager.git
 cd CrontabManager
 
-# Deploy
+# Deploy (install dependencies)
 ./deploy.sh
 
-# Start
+# Configure environment (optional)
+cp .env.example .env
+cp frontend/.env.example frontend/.env.local
+
+# Start services
 ./start.sh
+
+# Check status
+./status.sh
+
+# Stop services
+./stop.sh
 ```
 
-Visit http://localhost:3000
+Visit http://localhost:3000 (or your configured FRONTEND_PORT)
 
 ### Manual Install
 
@@ -254,28 +264,53 @@ CrontabManager/
 │   │           └── cron.log    # Execution log
 │   ├── main.py           # Entry point
 │   ├── models.py         # Pydantic models
+│   ├── config.py         # Configuration
 │   └── requirements.txt
 ├── frontend/             # Next.js frontend
 │   ├── app/              # Page routes
 │   ├── components/       # Components
-│   └── lib/
-│       └── api.ts        # API client
+│   ├── lib/
+│   │   └── api.ts        # API client
+│   ├── next.config.js    # Next.js configuration
+│   └── .env.example      # Frontend env example
 ├── .github/
 │   └── workflows/
 │       └── release.yml   # Auto-release workflow
+├── .env.example          # Backend env example
 ├── deploy.sh             # Deploy script
 ├── start.sh              # Start script
 ├── stop.sh               # Stop script
+├── status.sh             # Status check script
+├── VERSION               # Version file
 ├── VERSION               # Version file
 └── README.md
 ```
 
 ## Configuration
 
-Edit `.env` file:
+### Backend Environment Variables
+
+Copy `.env.example` to `.env` and configure:
+
+```bash
+cp .env.example .env
+```
+
+**Core Settings:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BACKEND_HOST` | `0.0.0.0` | Backend bind address (`0.0.0.0` for all, `127.0.0.1` for localhost only) |
+| `BACKEND_PORT` | `8000` | Backend API port |
+| `DATA_DIR` | `./data` | Data directory for scripts and logs |
+| `SCRIPTS_DIR` | `./data/scripts` | Scripts storage directory |
+| `CRONTAB_USER` | (empty) | Crontab user (empty = current user, `root` = system crontab) |
+| `CRON_TASK_PREFIX` | `# script-monitor-task:` | Prefix for identifying tasks in crontab |
+
+**Example `.env`:**
 
 ```env
-# Backend config
+# Backend Configuration
 BACKEND_HOST=0.0.0.0
 BACKEND_PORT=8000
 
@@ -283,14 +318,72 @@ BACKEND_PORT=8000
 DATA_DIR=./data
 SCRIPTS_DIR=./data/scripts
 
-# Crontab user (empty = current user)
+# Crontab Configuration
 CRONTAB_USER=
+CRON_TASK_PREFIX=# script-monitor-task:
 
-# Task prefix in crontab
-CRON_TASK_PREFIX=# script-monitor:
+# Advanced
+LOG_LEVEL=INFO
+```
+
+### Frontend Environment Variables
+
+Copy `frontend/.env.example` to `frontend/.env.local`:
+
+```bash
+cp frontend/.env.example frontend/.env.local
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Backend API URL |
+| `PORT` | `3000` | Frontend development server port |
+
+**To use a different backend address:**
+
+```env
+# If backend is on another machine
+NEXT_PUBLIC_API_URL=http://192.168.1.100:8000
+
+# Or different port
+NEXT_PUBLIC_API_URL=http://localhost:8080
+```
+
+### Changing Ports
+
+To run on custom ports, edit both `.env` files:
+
+**`.env` (backend):**
+```env
+BACKEND_PORT=8080
+```
+
+**`frontend/.env.local`:**
+```env
+PORT=8081
+NEXT_PUBLIC_API_URL=http://localhost:8080
+```
+
+Then restart services:
+```bash
+./stop.sh
+./start.sh
 ```
 
 ## Development
+
+### Available Scripts
+
+After deployment, the following scripts are available in the project root:
+
+| Script | Description |
+|--------|-------------|
+| `./start.sh` | Start backend and frontend services |
+| `./stop.sh` | Stop all services |
+| `./status.sh` | Check if services are running |
+| `./deploy.sh` | Deploy/Install dependencies |
+
+All scripts read port configuration from `.env` file.
 
 ### Makefile Commands
 
