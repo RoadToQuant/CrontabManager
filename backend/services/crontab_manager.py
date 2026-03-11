@@ -1,7 +1,6 @@
-"""Crontab management service."""
-import os
-import re
+"""Crontab management service - crontab as single source of truth."""
 import json
+import re
 import subprocess
 import shutil
 from pathlib import Path
@@ -9,15 +8,23 @@ from typing import List, Optional, Dict
 from datetime import datetime
 
 from config import get_settings
+from models import Task
 
 settings = get_settings()
 
 
 class CrontabManager:
-    """Manage system crontab entries for script-monitor tasks."""
+    """Manage system crontab entries for script-monitor tasks.
+    
+    All task data is stored in crontab comments as JSON.
+    Format:
+    # script-monitor:{"id":1,"name":"Task Name",...}
+    * * * * * /path/to/script >> /path/to/log 2>&1
+    """
+    
+    TASK_MARKER_PREFIX = "# script-monitor:"
     
     def __init__(self):
-        self.prefix = settings.cron_task_prefix
         self.scripts_dir = Path(settings.scripts_dir)
     
     def _get_crontab_content(self) -> str:
@@ -41,7 +48,6 @@ class CrontabManager:
             if result.returncode == 0:
                 return result.stdout
             else:
-                # No crontab exists yet
                 return ""
         except Exception as e:
             print(f"Error reading crontab: {e}")
@@ -50,11 +56,9 @@ class CrontabManager:
     def _set_crontab_content(self, content: str) -> bool:
         """Set crontab content."""
         try:
-            # Write to temporary file
             temp_file = Path("/tmp/script_monitor_crontab.tmp")
-            temp_file.write_text(content)
+            temp_file.write_text(content, encoding='utf-8')
             
-            # Install new crontab
             if settings.crontab_user:
                 result = subprocess.run(
                     ["crontab", "-u", settings.crontab_user, str(temp_file)],
@@ -70,7 +74,6 @@ class CrontabManager:
                     check=True
                 )
             
-            # Clean up temp file
             temp_file.unlink(missing_ok=True)
             return True
             
@@ -81,181 +84,181 @@ class CrontabManager:
             print(f"Error setting crontab: {e}")
             return False
     
-    def _generate_script_file(self, task_id: int, name: str, content: str, 
-                              working_dir: str = "", env_vars: str = "{}",
-                              task_type: str = "inline",
-                              script_source_path: Optional[str] = None) -> Path:
+    def _parse_task_from_comment(self, comment_line: str) -> Optional[Dict]:
+        """Parse task data from a crontab comment line."""
+        stripped = comment_line.strip()
+        if not stripped.startswith(self.TASK_MARKER_PREFIX):
+            return None
+        try:
+            json_str = stripped[len(self.TASK_MARKER_PREFIX):]
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            return None
+    
+    def _build_task_comment(self, task: Task) -> str:
+        """Build a crontab comment line with task data."""
+        task_dict = task.to_dict()
+        # Don't store script_path in crontab (it's derived from id)
+        task_dict.pop('script_path', None)
+        return f"{self.TASK_MARKER_PREFIX}{json.dumps(task_dict, ensure_ascii=False)}"
+    
+    def get_all_tasks(self) -> List[Task]:
+        """Get all script-monitor tasks from crontab."""
+        content = self._get_crontab_content()
+        tasks = []
+        
+        lines = content.split('\n')
+        for line in lines:
+            task_data = self._parse_task_from_comment(line)
+            if task_data:
+                # Add computed script_path
+                task_id = task_data.get('id')
+                if task_id:
+                    task_data['script_path'] = str(self.scripts_dir / f"task_{task_id}" / "run.sh")
+                tasks.append(Task(**task_data))
+        
+        return tasks
+    
+    def get_task(self, task_id: int) -> Optional[Task]:
+        """Get a single task by ID."""
+        for task in self.get_all_tasks():
+            if task.id == task_id:
+                return task
+        return None
+    
+    def _generate_next_id(self) -> int:
+        """Generate next available task ID."""
+        tasks = self.get_all_tasks()
+        if not tasks:
+            return 1
+        return max(t.id for t in tasks) + 1
+    
+    def _generate_script_file(self, task_id: int, name: str, content: str,
+                              working_dir: str = "", env_vars: str = "{}") -> Path:
         """Generate bash script file for a task."""
-        # Create scripts directory for this task
         task_script_dir = self.scripts_dir / f"task_{task_id}"
         task_script_dir.mkdir(parents=True, exist_ok=True)
         
-        # Script file path
         script_file = task_script_dir / "run.sh"
         
-        if task_type == "file" and script_source_path:
-            # For file type: create a wrapper that calls the original script
-            source_path = Path(script_source_path).expanduser().resolve()
-            
-            # Parse environment variables
-            try:
-                env_dict = json.loads(env_vars) if env_vars else {}
-            except:
-                env_dict = {}
-            
-            # Build wrapper script
-            script_lines = [
-                "#!/bin/bash",
-                "",
-                f"# Auto-generated by Script Monitor",
-                f"# Task: {name}",
-                f"# Source: {script_source_path}",
-                f"# Created: {datetime.now().isoformat()}",
-                "",
-                "# Set error handling",
-                "set -e",
-                "",
-            ]
-            
-            # Add environment variables
-            if env_dict:
-                script_lines.append("# Environment variables")
-                for key, value in env_dict.items():
-                    escaped_value = value.replace('"', '\\"')
-                    script_lines.append(f'export {key}="{escaped_value}"')
-                script_lines.append("")
-            
-            # Add working directory
-            if working_dir:
-                script_lines.append(f"# Change to working directory")
-                script_lines.append(f'cd "{working_dir}"')
-                script_lines.append("")
-            
-            # Call the original script
-            script_lines.append(f"# Execute original script")
-            script_lines.append(f'"{source_path}"')
+        try:
+            env_dict = json.loads(env_vars) if env_vars else {}
+        except:
+            env_dict = {}
+        
+        script_lines = [
+            "#!/bin/bash",
+            "",
+            f"# Auto-generated by Script Monitor",
+            f"# Task: {name}",
+            f"# Created: {datetime.now().isoformat()}",
+            "",
+            "# Set error handling",
+            "set -e",
+            "",
+        ]
+        
+        if env_dict:
+            script_lines.append("# Environment variables")
+            for key, value in env_dict.items():
+                escaped_value = str(value).replace('"', '\\"')
+                script_lines.append(f'export {key}="{escaped_value}"')
             script_lines.append("")
-            
-            # Write wrapper script
-            script_file.write_text("\n".join(script_lines), encoding='utf-8')
-            script_file.chmod(0o755)
-        else:
-            # For inline type: use the content directly
-            # Parse environment variables
-            try:
-                env_dict = json.loads(env_vars) if env_vars else {}
-            except:
-                env_dict = {}
-            
-            # Build script content
-            script_lines = [
-                "#!/bin/bash",
-                "",
-                f"# Auto-generated by Script Monitor",
-                f"# Task: {name}",
-                f"# Created: {datetime.now().isoformat()}",
-                "",
-                "# Set error handling",
-                "set -e",
-                "",
-            ]
-            
-            # Add environment variables
-            if env_dict:
-                script_lines.append("# Environment variables")
-                for key, value in env_dict.items():
-                    escaped_value = value.replace('"', '\\"')
-                    script_lines.append(f'export {key}="{escaped_value}"')
-                script_lines.append("")
-            
-            # Add working directory
-            if working_dir:
-                script_lines.append(f"# Change to working directory")
-                script_lines.append(f'cd "{working_dir}"')
-                script_lines.append("")
-            
-            # Add user script content
-            script_lines.append("# User script")
-            script_lines.append(content)
+        
+        if working_dir:
+            script_lines.append(f"# Change to working directory")
+            script_lines.append(f'cd "{working_dir}"')
             script_lines.append("")
-            
-            # Write script file
-            script_file.write_text("\n".join(script_lines), encoding='utf-8')
-            script_file.chmod(0o755)
+        
+        script_lines.append("# User script")
+        script_lines.append(content)
+        script_lines.append("")
+        
+        script_file.write_text("\n".join(script_lines), encoding='utf-8')
+        script_file.chmod(0o755)
         
         return script_file
     
-    def _build_cron_line(self, task_id: int, name: str, cron: str, 
-                         script_path: Path, enabled: bool = True,
-                         custom_log_path: Optional[str] = None) -> str:
-        """Build a crontab line for a task."""
-        # Escape special characters in name
-        safe_name = name.replace('"', '\\"')
+    def add_or_update_task(self, task: Task, script_content: str) -> Optional[Path]:
+        """Add or update a task in crontab.
         
-        # Determine log file path
-        if custom_log_path:
-            log_file = Path(custom_log_path).expanduser()
-            log_file.parent.mkdir(parents=True, exist_ok=True)
-        else:
-            log_file = self.scripts_dir / f"task_{task_id}" / "cron.log"
+        Args:
+            task: Task model (id can be 0 for new tasks)
+            script_content: The bash script content
+            
+        Returns:
+            Path to the script file if successful, None otherwise
+        """
+        # Assign ID for new tasks
+        if task.id is None or task.id == 0:
+            task.id = self._generate_next_id()
+            if not task.created_at:
+                task.created_at = datetime.utcnow().isoformat()
         
-        # Build the cron line with metadata comment
-        lines = [
-            f"{self.prefix}{task_id}",
-            f"# name=\"{safe_name}\"",
-        ]
+        task.updated_at = datetime.utcnow().isoformat()
         
-        if enabled:
-            # The actual cron job - redirect output to log file
-            cron_cmd = f"{cron} {script_path} >> {log_file} 2>&1"
-            lines.append(cron_cmd)
-        else:
-            # Commented out (disabled)
-            cron_cmd = f"{cron} {script_path} >> {log_file} 2>&1"
-            lines.append(f"# {cron_cmd}")
-        
-        return "\n".join(lines)
-    
-    def add_or_update_task(self, task_id: int, name: str, cron: str, 
-                           script_content: str, working_dir: str = "",
-                           env_vars: str = "{}", enabled: bool = True,
-                           task_type: str = "inline",
-                           script_source_path: Optional[str] = None,
-                           custom_log_path: Optional[str] = None) -> Optional[Path]:
-        """Add or update a task in crontab."""
         # Generate script file
         script_path = self._generate_script_file(
-            task_id, name, script_content, working_dir, env_vars,
-            task_type, script_source_path
+            task.id, task.name, script_content,
+            task.working_dir or "", task.env_vars or "{}"
         )
         
-        # Get current crontab
-        crontab_content = self._get_crontab_content()
+        # Read current crontab
+        content = self._get_crontab_content()
         
-        # Build new cron entry
-        new_entry = self._build_cron_line(
-            task_id, name, cron, script_path, enabled, custom_log_path
-        )
+        # Remove existing entry for this task
+        content = self._remove_task_from_content(task.id, content)
         
-        # Remove existing entry for this task if exists
-        crontab_content = self.remove_task_from_content(task_id, crontab_content)
+        # Build new entry
+        task_comment = self._build_task_comment(task)
+        log_file = self.scripts_dir / f"task_{task.id}" / "cron.log"
         
-        # Add new entry
-        if crontab_content and not crontab_content.endswith("\n"):
-            crontab_content += "\n"
-        crontab_content += new_entry + "\n"
+        if task.status == "enabled":
+            cron_line = f"{task.cron} {script_path} >> {log_file} 2>&1"
+        else:
+            cron_line = f"# {task.cron} {script_path} >> {log_file} 2>&1"
         
-        # Install new crontab
-        if self._set_crontab_content(crontab_content):
+        new_entry = f"{task_comment}\n{cron_line}"
+        
+        # Add to crontab content
+        if content and not content.endswith('\n'):
+            content += '\n'
+        content += new_entry + '\n'
+        
+        if self._set_crontab_content(content):
             return script_path
         return None
     
-    def remove_task(self, task_id: int) -> bool:
-        """Remove a task from crontab."""
-        crontab_content = self._get_crontab_content()
-        crontab_content = self.remove_task_from_content(task_id, crontab_content)
+    def _remove_task_from_content(self, task_id: int, content: str) -> str:
+        """Remove a task entry from crontab content.
         
-        if self._set_crontab_content(crontab_content):
+        Removes both the comment line and the following cron line.
+        """
+        lines = content.split('\n')
+        result_lines = []
+        skip_next = False
+        
+        for line in lines:
+            # Check if this is the target task's comment line
+            task_data = self._parse_task_from_comment(line)
+            if task_data and task_data.get('id') == task_id:
+                skip_next = True  # Skip this line and the next (cron line)
+                continue
+            
+            if skip_next:
+                skip_next = False
+                continue
+            
+            result_lines.append(line)
+        
+        return '\n'.join(result_lines)
+    
+    def delete_task(self, task_id: int) -> bool:
+        """Delete a task from crontab and remove its files."""
+        content = self._get_crontab_content()
+        content = self._remove_task_from_content(task_id, content)
+        
+        if self._set_crontab_content(content):
             # Clean up script directory
             task_script_dir = self.scripts_dir / f"task_{task_id}"
             if task_script_dir.exists():
@@ -263,161 +266,64 @@ class CrontabManager:
             return True
         return False
     
-    def remove_task_from_content(self, task_id: int, content: str) -> str:
-        """Remove a task entry from crontab content."""
-        lines = content.split("\n")
-        result_lines = []
-        skip_until_next_entry = False
+    def toggle_task(self, task_id: int) -> bool:
+        """Toggle task enabled/disabled status."""
+        task = self.get_task(task_id)
+        if not task:
+            return False
         
-        for line in lines:
-            # Check if this is the start of our task entry
-            if line.strip() == f"{self.prefix}{task_id}":
-                skip_until_next_entry = True
-                continue
-            
-            # Skip lines until we hit a non-comment, non-metadata line or another entry
-            if skip_until_next_entry:
-                # If we hit another script-monitor entry or a non-metadata line, stop skipping
-                if line.startswith(self.prefix) or (line.strip() and not line.startswith("#") and "=" not in line):
-                    skip_until_next_entry = False
-                    if not line.startswith(self.prefix):
-                        result_lines.append(line)
-                # Skip metadata comments
-                elif line.startswith("# name=") or line.strip() == "":
-                    continue
-                # Skip the actual cron line (commented or not)
-                elif not line.startswith("#") or (line.startswith("#") and len(line) > 2 and line[2:].strip()[0].isdigit()):
-                    continue
-                else:
-                    result_lines.append(line)
-            else:
-                result_lines.append(line)
+        # Toggle status
+        task.status = "disabled" if task.status == "enabled" else "enabled"
+        task.updated_at = datetime.utcnow().isoformat()
         
-        return "\n".join(result_lines)
+        # Read existing script content
+        script_path = Path(task.script_path) if task.script_path else self.scripts_dir / f"task_{task_id}" / "run.sh"
+        script_content = ""
+        if script_path.exists():
+            script_content = script_path.read_text(encoding='utf-8')
+        
+        return self.add_or_update_task(task, script_content) is not None
     
-    def toggle_task(self, task_id: int, name: str, cron: str, 
-                    script_path: str, enabled: bool) -> bool:
-        """Enable or disable a task in crontab."""
-        crontab_content = self._get_crontab_content()
+    def sync_from_crontab(self) -> Dict:
+        """Sync from crontab - cleanup orphan script directories.
         
-        # Remove existing entry
-        crontab_content = self.remove_task_from_content(task_id, crontab_content)
+        Returns format compatible with frontend expectations:
+        { "added": [], "removed": [], "updated": [], "errors": [] }
+        """
+        tasks = self.get_all_tasks()
+        valid_ids = {t.id for t in tasks}
         
-        # Add updated entry
-        script_path_obj = Path(script_path)
-        new_entry = self._build_cron_line(task_id, name, cron, script_path_obj, enabled)
+        removed = []
+        errors = []
         
-        if crontab_content and not crontab_content.endswith("\n"):
-            crontab_content += "\n"
-        crontab_content += new_entry + "\n"
+        # Clean up orphan directories
+        if self.scripts_dir.exists():
+            for item in self.scripts_dir.iterdir():
+                if item.is_dir() and item.name.startswith('task_'):
+                    try:
+                        task_id = int(item.name.split('_')[1])
+                        if task_id not in valid_ids:
+                            shutil.rmtree(item)
+                            removed.append(task_id)
+                    except (ValueError, IndexError):
+                        pass
         
-        return self._set_crontab_content(crontab_content)
-    
-    def get_all_tasks(self) -> List[Dict]:
-        """Get all script-monitor tasks from crontab."""
-        content = self._get_crontab_content()
-        tasks = []
-        
-        lines = content.split("\n")
-        current_task = None
-        
-        for line in lines:
-            line = line.strip()
-            
-            # Check for task marker
-            if line.startswith(self.prefix):
-                task_id = line[len(self.prefix):].strip()
-                current_task = {
-                    "task_id": task_id,
-                    "name": "",
-                    "cron": "",
-                    "command": "",
-                    "enabled": True
-                }
-            
-            # Parse metadata
-            elif current_task and line.startswith("# name="):
-                match = re.match(r'# name="(.+)"', line)
-                if match:
-                    current_task["name"] = match.group(1)
-            
-            # Parse cron line
-            elif current_task and line:
-                # Check if disabled (commented out)
-                if line.startswith("#"):
-                    current_task["enabled"] = False
-                    line = line[1:].strip()
-                
-                # Parse cron expression (first 5 fields)
-                # Format: minute hour day month day_of_week command
-                parts = line.split()
-                if len(parts) >= 6:
-                    current_task["cron"] = " ".join(parts[:5])
-                    current_task["command"] = " ".join(parts[5:])
-                    tasks.append(current_task)
-                    current_task = None
-        
-        return tasks
-    
-    def sync_task_status(self, db_tasks: List) -> Dict:
-        """Sync database tasks with crontab."""
-        from services.file_storage import file_storage
-        
-        crontab_tasks = self.get_all_tasks()
-        crontab_task_ids = {int(t["task_id"]) for t in crontab_tasks}
-        db_task_ids = {t.id for t in db_tasks}
-        
-        result = {
-            "added": [],
-            "removed": [],
-            "updated": [],
-            "errors": []
+        # Return format expected by frontend
+        return {
+            "added": [],  # Tasks are already in crontab, nothing to add
+            "removed": removed,  # Orphan directories removed
+            "updated": [],  # No updates performed during sync
+            "errors": errors
         }
-        
-        # Add missing tasks to crontab
-        for task in db_tasks:
-            if task.id not in crontab_task_ids and task.status == "enabled":
-                # Read script content from file
-                script_path = file_storage.get_script_path(task.id)
-                if script_path.exists():
-                    script_content = script_path.read_text(encoding='utf-8')
-                else:
-                    script_content = file_storage.get_default_template()
-                
-                new_script_path = self.add_or_update_task(
-                    task.id, task.name, task.cron,
-                    script_content, task.working_dir,
-                    task.env_vars, enabled=True,
-                    task_type=task.task_type,
-                    script_source_path=task.script_source_path,
-                    custom_log_path=task.custom_log_path
-                )
-                if new_script_path:
-                    result["added"].append(task.id)
-                else:
-                    result["errors"].append(f"Failed to add task {task.id}")
-        
-        # Remove tasks from crontab that don't exist in DB
-        for cron_task in crontab_tasks:
-            task_id = int(cron_task["task_id"])
-            if task_id not in db_task_ids:
-                if self.remove_task(task_id):
-                    result["removed"].append(task_id)
-        
-        return result
     
-    def get_task_log(self, task_id: int, lines: int = 100, custom_log_path: Optional[str] = None) -> str:
+    def get_task_log(self, task_id: int, lines: int = 100) -> str:
         """Get cron log for a task."""
-        if custom_log_path:
-            log_file = Path(custom_log_path).expanduser()
-        else:
-            log_file = self.scripts_dir / f"task_{task_id}" / "cron.log"
+        log_file = self.scripts_dir / f"task_{task_id}" / "cron.log"
         
         if not log_file.exists():
             return ""
         
         try:
-            # Read last N lines
             result = subprocess.run(
                 ["tail", "-n", str(lines), str(log_file)],
                 capture_output=True,
@@ -427,6 +333,10 @@ class CrontabManager:
             return result.stdout if result.returncode == 0 else ""
         except Exception as e:
             return f"Error reading log: {e}"
+    
+    def get_script_path(self, task_id: int) -> Path:
+        """Get script file path for a task."""
+        return self.scripts_dir / f"task_{task_id}" / "run.sh"
 
 
 # Global instance

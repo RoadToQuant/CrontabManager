@@ -1,117 +1,85 @@
-"""Database models - simplified for crontab mode."""
+"""Task models - Pydantic only, no database."""
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-
-from config import get_settings
-
-settings = get_settings()
-
-Base = declarative_base()
-engine = create_engine(
-    settings.database_url,
-    connect_args={"check_same_thread": False} if "sqlite" in settings.database_url else {}
-)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+from typing import Optional, List
+from pydantic import BaseModel, Field
 
 
-class Task(Base):
-    """Task model - minimal info for crontab management."""
-    __tablename__ = "tasks"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), nullable=False)
-    description = Column(Text, nullable=True)
-    cron = Column(String(100), nullable=False)
-    # Task type: 'inline' (script content) or 'file' (existing script file)
-    task_type = Column(String(20), default="inline")
-    # For 'file' type: path to existing script
-    script_source_path = Column(String(500), nullable=True)
-    # Script file path (auto-generated wrapper script for 'inline' type, symlink/copy for 'file' type)
-    script_path = Column(String(500), nullable=True)
-    # Custom log output path (optional, for 'file' type)
-    custom_log_path = Column(String(500), nullable=True)
-    # Working directory for the script
-    working_dir = Column(String(500), nullable=True, default="")
-    # Environment variables (JSON format)
-    env_vars = Column(Text, nullable=True, default="{}")
-    status = Column(String(20), default="enabled")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+class Task(BaseModel):
+    """Task model - all data stored in crontab comments."""
+    id: int
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = ""
+    cron: str = Field(..., min_length=1, max_length=100)
+    script_path: Optional[str] = None  # Runtime computed, not stored
+    working_dir: Optional[str] = ""
+    env_vars: Optional[str] = "{}"  # JSON string
+    status: str = "enabled"  # enabled/disabled
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
     
     def to_dict(self):
         """Convert to dictionary."""
-        return {
-            "id": self.id,
-            "name": self.name,
-            "description": self.description,
-            "cron": self.cron,
-            "task_type": self.task_type,
-            "script_source_path": self.script_source_path,
-            "script_path": self.script_path,
-            "custom_log_path": self.custom_log_path,
-            "working_dir": self.working_dir,
-            "env_vars": self.env_vars,
-            "status": self.status,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
+        return self.model_dump()
 
 
-class TaskRun(Base):
-    """Task execution run model - for tracking manual execution history."""
-    __tablename__ = "task_runs"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    task_id = Column(Integer, nullable=False, index=True)
-    status = Column(String(20), default="running")
-    start_time = Column(DateTime, default=datetime.utcnow)
-    end_time = Column(DateTime, nullable=True)
-    log_output = Column(Text, nullable=True)
-    exit_code = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+class TaskRun(BaseModel):
+    """Task execution run - stored in memory."""
+    id: int
+    task_id: int
+    status: str = "running"
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    log_output: Optional[str] = None
+    exit_code: Optional[int] = None
+    created_at: Optional[str] = None
     
     def to_dict(self):
         """Convert to dictionary."""
-        return {
-            "id": self.id,
-            "task_id": self.task_id,
-            "status": self.status,
-            "start_time": self.start_time.isoformat() if self.start_time else None,
-            "end_time": self.end_time.isoformat() if self.end_time else None,
-            "log_output": self.log_output,
-            "exit_code": self.exit_code,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-        }
+        return self.model_dump()
 
 
-class Setting(Base):
-    """System settings model."""
-    __tablename__ = "settings"
+# In-memory storage for task runs (since we removed database)
+class InMemoryStore:
+    """Simple in-memory store for task runs."""
     
-    key = Column(String(100), primary_key=True)
-    value = Column(Text, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    def __init__(self):
+        self.runs: List[TaskRun] = []
+        self._counter = 0
     
-    def to_dict(self):
-        """Convert to dictionary."""
-        return {
-            "key": self.key,
-            "value": self.value,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
+    def create_run(self, task_id: int) -> TaskRun:
+        """Create a new task run."""
+        self._counter += 1
+        run = TaskRun(
+            id=self._counter,
+            task_id=task_id,
+            status="running",
+            start_time=datetime.utcnow().isoformat(),
+            created_at=datetime.utcnow().isoformat(),
+        )
+        self.runs.append(run)
+        return run
+    
+    def get_run(self, run_id: int) -> Optional[TaskRun]:
+        """Get a task run by ID."""
+        for run in self.runs:
+            if run.id == run_id:
+                return run
+        return None
+    
+    def get_task_runs(self, task_id: int, limit: int = 20) -> List[TaskRun]:
+        """Get runs for a specific task."""
+        task_runs = [r for r in self.runs if r.task_id == task_id]
+        # Sort by id desc (newest first) and limit
+        task_runs.sort(key=lambda x: x.id, reverse=True)
+        return task_runs[:limit]
+    
+    def update_run(self, run: TaskRun) -> None:
+        """Update a task run (in-place)."""
+        for i, r in enumerate(self.runs):
+            if r.id == run.id:
+                self.runs[i] = run
+                break
 
 
-def get_db():
-    """Get database session."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-def init_db():
-    """Initialize database."""
-    Base.metadata.create_all(bind=engine)
+# Global in-memory store instance
+memory_store = InMemoryStore()

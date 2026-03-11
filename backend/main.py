@@ -1,13 +1,10 @@
 """Main application entry point."""
-import sys
 from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from config import get_settings
-from models import init_db
 from api import api_router
 from scheduler import scheduler
 
@@ -17,9 +14,8 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
-    # Startup
     print("Starting up...")
-    init_db()
+    # No database initialization needed - crontab is the source of truth
     scheduler.start()
     print(f"Server running on http://{settings.backend_host}:{settings.backend_port}")
     yield
@@ -30,15 +26,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Crontab Manager",
-    description="A crontab-based script task management platform",
-    version="2.0.0",
+    description="A crontab-based script task management platform (SQLite-free)",
+    version="3.0.0",
     lifespan=lifespan,
 )
 
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict this
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -59,9 +55,9 @@ async def root():
     """Root endpoint."""
     return {
         "name": "Crontab Manager",
-        "version": "2.0.0",
+        "version": "3.0.0",
         "docs": "/docs",
-        "mode": "crontab",
+        "mode": "crontab (sqlite-free)",
     }
 
 

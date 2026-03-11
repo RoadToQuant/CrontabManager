@@ -1,8 +1,8 @@
 -i https://mirrors.aliyun.com/pypi/simple/
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
-sqlalchemy==2.0.25
 pydantic==2.5.3
 pydantic-settings==2.1.0
 python-dotenv==1.0.0
 python-multipart==0.0.6
+# sqlalchemy removed - crontab is now the single source of truth

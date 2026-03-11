@@ -1,9 +1,8 @@
-"""Editor API routes for script content."""
-from fastapi import APIRouter, Depends, HTTPException
+"""Editor API routes for script content - no database dependency."""
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
-from models import Task, get_db
+from services.crontab_manager import crontab_manager
 from services.file_storage import file_storage
 
 router = APIRouter()
@@ -14,9 +13,9 @@ class ScriptContent(BaseModel):
 
 
 @router.get("/{task_id}/script")
-def get_script(task_id: int, db: Session = Depends(get_db)):
+def get_script(task_id: int):
     """Get script content for a task."""
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = crontab_manager.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
@@ -35,32 +34,17 @@ def get_script(task_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{task_id}/script")
-async def update_script(task_id: int, data: ScriptContent, db: Session = Depends(get_db)):
+async def update_script(task_id: int, data: ScriptContent):
     """Update script content for a task."""
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = crontab_manager.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    # Save to file
-    await file_storage.write_script(task_id, data.content)
+    # Save to file and update crontab
+    script_path = crontab_manager.add_or_update_task(task, data.content)
     
-    # Update crontab
-    from services.crontab_manager import crontab_manager
-    script_path = crontab_manager.add_or_update_task(
-        task.id,
-        task.name,
-        task.cron,
-        data.content,
-        task.working_dir,
-        task.env_vars,
-        enabled=(task.status == "enabled")
-    )
-    
-    if script_path:
-        task.script_path = str(script_path)
-        from datetime import datetime
-        task.updated_at = datetime.utcnow()
-        db.commit()
+    if not script_path:
+        raise HTTPException(status_code=500, detail="Failed to update script")
     
     return {"message": "Script updated successfully"}
 
