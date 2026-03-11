@@ -17,9 +17,7 @@ NC='\033[0m'
 
 # Load environment variables
 if [ -f "$PROJECT_PATH/.env" ]; then
-    set -a
-    source "$PROJECT_PATH/.env"
-    set +a
+    export $(grep -v '^#' "$PROJECT_PATH/.env" | xargs)
 fi
 
 # Default values
@@ -27,6 +25,8 @@ BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 PYTHON_ENV_TYPE="${PYTHON_ENV_TYPE:-venv}"
+CONDA_ACTIVATE="${CONDA_ACTIVATE:-/home/ubuntu/miniconda3/bin/activate}"
+CONDA_ENV="${CONDA_ENV:-py39-sm}"
 
 echo -e "${GREEN}================================${NC}"
 echo -e "${GREEN}  Crontab Manager - DEV Mode${NC}"
