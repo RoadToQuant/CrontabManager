@@ -1,0 +1,105 @@
+import { Task, TaskRun, Executor, SystemSettings, StorageStats } from '@/types';
+
+const API_BASE = '/api';
+
+async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE}${url}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+  
+  return response.json();
+}
+
+// Tasks API
+export const tasksApi = {
+  list: () => fetchApi<Task[]>('/tasks'),
+  get: (id: number) => fetchApi<Task>(`/tasks/${id}`),
+  create: (data: Partial<Task>) => fetchApi<Task>('/tasks', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  update: (id: number, data: Partial<Task>) => fetchApi<Task>(`/tasks/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  }),
+  delete: (id: number) => fetchApi<void>(`/tasks/${id}`, {
+    method: 'DELETE',
+  }),
+  run: (id: number) => fetchApi<{ message: string; run: TaskRun }>(`/tasks/${id}/run`, {
+    method: 'POST',
+  }),
+  toggle: (id: number) => fetchApi<{ message: string; status: string }>(`/tasks/${id}/toggle`, {
+    method: 'POST',
+  }),
+  getRuns: (id: number) => fetchApi<TaskRun[]>(`/tasks/${id}/runs`),
+  getCronLog: (id: number, lines?: number) => fetchApi<{ log: string }>(`/tasks/${id}/cron-log?lines=${lines || 100}`),
+  sync: () => fetchApi<{ added: number[]; removed: number[]; updated: number[]; errors: string[] }>('/tasks/sync', {
+    method: 'POST',
+  }),
+};
+
+// Script Editor API
+export const editorApi = {
+  getScript: (taskId: number) => fetchApi<{
+    task_id: number;
+    content: string;
+    name: string;
+  }>(`/tasks/${taskId}/script`),
+  updateScript: (taskId: number, content: string) => fetchApi<{
+    message: string;
+  }>(`/tasks/${taskId}/script`, {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  }),
+  getTemplate: () => fetchApi<{ content: string }>('/tasks/template'),
+};
+
+// Logs API
+export const logsApi = {
+  getTaskLog: (taskId: number, lines?: number) => fetchApi<{
+    task_id: number;
+    log: string;
+    lines: number;
+  }>(`/logs/task/${taskId}?lines=${lines || 100}`),
+  getLogSize: (taskId: number) => fetchApi<{
+    task_id: number;
+    size_bytes: number;
+    size_kb: number;
+  }>(`/logs/task/${taskId}/size`),
+  clearLog: (taskId: number) => fetchApi<{ message: string }>(`/logs/task/${taskId}/clear`, {
+    method: 'POST',
+  }),
+  getRunLog: (runId: number) => fetchApi<{
+    run_id: number;
+    task_id: number;
+    status: string;
+    log: string;
+    exit_code?: number;
+    start_time?: string;
+    end_time?: string;
+  }>(`/logs/run/${runId}`),
+};
+
+// Executors API
+export const executorsApi = {
+  getInfo: () => fetchApi<Executor>('/executors'),
+  validateCron: (cron: string) => fetchApi<{ valid: boolean; cron?: string; error?: string }>(`/executors/validate-cron?cron=${encodeURIComponent(cron)}`),
+};
+
+// Settings API
+export const settingsApi = {
+  get: () => fetchApi<{ settings: Record<string, string>; system: SystemSettings }>('/settings'),
+  getRawCrontab: () => fetchApi<{ content: string }>('/settings/crontab/raw'),
+  syncCrontab: () => fetchApi<{ added: number[]; removed: number[]; updated: number[]; errors: string[] }>('/settings/crontab/sync', {
+    method: 'POST',
+  }),
+};
