@@ -85,7 +85,7 @@ export default function TasksPage() {
   const handleSync = async () => {
     try {
       const result = await tasksApi.sync();
-      alert(`同步完成！\n新增: ${result.added.length}\n移除: ${result.removed.length}\n更新: ${result.updated.length}`);
+      alert(`同步完成！\n从 crontab 读取任务: ${result.tasks_count}\n清理孤儿目录: ${result.removed_dirs.length}`);
       loadTasks();
     } catch (error) {
       alert('Failed to sync: ' + (error as Error).message);

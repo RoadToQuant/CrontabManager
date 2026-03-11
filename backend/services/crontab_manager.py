@@ -287,13 +287,13 @@ class CrontabManager:
     def sync_from_crontab(self) -> Dict:
         """Sync from crontab - cleanup orphan script directories.
         
-        Returns format compatible with frontend expectations:
-        { "added": [], "removed": [], "updated": [], "errors": [] }
+        Returns format for frontend:
+        { "tasks_count": N, "removed_dirs": [1, 2, ...], "errors": [] }
         """
         tasks = self.get_all_tasks()
         valid_ids = {t.id for t in tasks}
         
-        removed = []
+        removed_dirs = []
         errors = []
         
         # Clean up orphan directories
@@ -304,15 +304,13 @@ class CrontabManager:
                         task_id = int(item.name.split('_')[1])
                         if task_id not in valid_ids:
                             shutil.rmtree(item)
-                            removed.append(task_id)
+                            removed_dirs.append(task_id)
                     except (ValueError, IndexError):
                         pass
         
-        # Return format expected by frontend
         return {
-            "added": [],  # Tasks are already in crontab, nothing to add
-            "removed": removed,  # Orphan directories removed
-            "updated": [],  # No updates performed during sync
+            "tasks_count": len(tasks),  # Number of tasks read from crontab
+            "removed_dirs": removed_dirs,  # Orphan script directories removed
             "errors": errors
         }
     
