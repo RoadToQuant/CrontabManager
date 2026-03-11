@@ -17,13 +17,16 @@ NC='\033[0m'
 
 # Load environment variables
 if [ -f "$PROJECT_PATH/.env" ]; then
-    export $(grep -v '^#' "$PROJECT_PATH/.env" | xargs)
+    set -a
+    source "$PROJECT_PATH/.env"
+    set +a
 fi
 
 # Default values
 BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+PYTHON_ENV_TYPE="${PYTHON_ENV_TYPE:-venv}"
 
 # Number of backend workers (adjust based on CPU cores)
 BACKEND_WORKERS="${BACKEND_WORKERS:-4}"
@@ -106,7 +109,21 @@ echo ""
 echo -e "${YELLOW}[3/4] Starting Backend (Production)...${NC}"
 
 cd "$PROJECT_PATH/backend"
-source venv/bin/activate
+
+# Activate Python environment
+if [ "$PYTHON_ENV_TYPE" == "conda" ]; then
+    if [ -f "$CONDA_ACTIVATE" ]; then
+        source "$CONDA_ACTIVATE"
+        conda activate "$CONDA_ENV"
+        echo "  Activated conda environment: $CONDA_ENV"
+    else
+        echo -e "${RED}Error: Conda not found at $CONDA_ACTIVATE${NC}"
+        exit 1
+    fi
+else
+    source venv/bin/activate
+    echo "  Activated venv environment"
+fi
 
 # Ensure log directory exists
 mkdir -p "$PROJECT_PATH/logs"

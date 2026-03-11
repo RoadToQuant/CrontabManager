@@ -141,7 +141,21 @@ check_port() {
 
 echo "[1/2] Starting backend service..."
 cd "$PROJECT_PATH/backend"
-source venv/bin/activate
+
+# Activate Python environment based on configuration
+if [ "$PYTHON_ENV_TYPE" == "conda" ]; then
+    if [ -f "$CONDA_ACTIVATE" ]; then
+        source "$CONDA_ACTIVATE"
+        conda activate "$CONDA_ENV"
+        echo "  Activated conda environment: $CONDA_ENV"
+    else
+        echo "  Error: Conda not found at $CONDA_ACTIVATE"
+        exit 1
+    fi
+else
+    source venv/bin/activate
+    echo "  Activated venv environment"
+fi
 
 if check_port "$BACKEND_PORT"; then
     nohup python main.py > ../logs/backend.log 2>&1 &
