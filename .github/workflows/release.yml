@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - release
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          # Get the latest tag
+          VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          if [ -z "$VERSION" ]; then
+            echo "No tag found, using default version"
+            VERSION="v0.0.0"
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION=${{ steps.get_version.outputs.version }}
+          
+          # Get commit messages since last tag
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+          
+          if [ -z "$PREVIOUS_TAG" ]; then
+            # First release, get all commits
+            CHANGELOG=$(git log --pretty=format:"- %s" | head -50)
+          else
+            # Get commits between tags
+            CHANGELOG=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s")
+          fi
+          
+          # Create release notes
+          NOTES="## Changes in ${VERSION}
+
+${CHANGELOG}
+
+## Installation
+
+\`\`\`bash
+# Clone the repository
+git clone https://github.com/${{ github.repository }}.git
+cd CrontabManager
+
+# Deploy
+./deploy.sh
+
+# Start
+./start.sh
+\`\``
+
+## Features
+
+- 📋 Web-based crontab management
+- 🔄 Two task types: Simple (one-time) and Daemon (auto-restart)
+- ⏸️ Task suspend/resume functionality
+- 📝 Script template system
+- 📊 Real-time log viewing
+- 🗑️ Selective deletion (script/log options)"
+
+          # Write to file
+          echo "$NOTES" > release_notes.md
+          cat release_notes.md
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          name: Release ${{ steps.get_version.outputs.version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
